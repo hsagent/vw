@@ -23,7 +23,7 @@ class Utility:
         Returns a dictionary with source configurations
         """
         try:
-            response = requests.get('https://raw.githubusercontent.com/Jesewe/VioletWing/refs/heads/main/src/offsets.json', timeout=10)
+            response = requests.get('https://raw.githubusercontent.com/hsagent/vw/refs/heads/main/src/offsets.json', timeout=10)
             response.raise_for_status()
             sources_data = orjson.loads(response.content)
             
@@ -49,13 +49,13 @@ class Utility:
                     "client_dll_url": "https://raw.githubusercontent.com/a2x/cs2-dumper/main/output/client_dll.json",
                     "buttons_url": "https://raw.githubusercontent.com/a2x/cs2-dumper/main/output/buttons.json"
                 },
-                "jesewe": {
+                "j": {
                     "name": "Jesewe Source", 
                     "author": "Jesewe",
                     "repository": "Jesewe/cs2-dumper",
-                    "offsets_url": "https://raw.githubusercontent.com/Jesewe/cs2-dumper/main/output/offsets.json",
-                    "client_dll_url": "https://raw.githubusercontent.com/Jesewe/cs2-dumper/main/output/client_dll.json",
-                    "buttons_url": "https://raw.githubusercontent.com/Jesewe/cs2-dumper/main/output/buttons.json"
+                    "offsets_url": "https://raw.githubusercontent.com/a2x/cs2-dumper/main/output/offsets.json",
+                    "client_dll_url": "https://raw.githubusercontent.com/a2x/cs2-dumper/main/output/client_dll.json",
+                    "buttons_url": "https://raw.githubusercontent.com/a2x/cs2-dumper/main/output/buttons.json"
                 }
             }
 
