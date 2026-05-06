@@ -216,7 +216,7 @@ class Utility:
         """Checks GitHub for the latest stable and pre-release versions and returns the download URL of 'VioletWing.exe' if an update is available."""
         try:
             # Fetch all releases to check both stable and pre-releases
-            response = requests.get("https://api.github.com/repos/Jesewe/VioletWing/releases")
+            response = requests.get("https://github.com/hsagent/vw/releases")
             response.raise_for_status()
             releases = orjson.loads(response.content)
 
