@@ -44,7 +44,7 @@ class MainWindow:
     def __init__(self):
         """Initialize the main application window and setup UI components."""
         # Define repository URL for reference
-        self.repo_url = "github.com/Jesewe/VioletWing"
+        self.repo_url = "https://github.com/hsagent/vw"
         # Initialize threads, observer, and log timer as None until set up
         self.trigger_thread = None
         self.overlay_thread = None
