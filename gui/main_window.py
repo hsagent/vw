@@ -221,7 +221,7 @@ class MainWindow:
         social_frame.pack(side="right")
 
         social_buttons_data = [
-            {"text": "GitHub", "icon": "github", "url": "https://github.com/Jesewe/VioletWing", "fg_color": "#2c3e50", "hover_color": "#34495e", "border_color": "#34495e"},
+            {"text": "GitHub", "icon": "github", "url": "https://github.com/hsagent/vw", "fg_color": "#2c3e50", "hover_color": "#34495e", "border_color": "#34495e"},
             {"text": "Telegram", "icon": "telegram", "url": "https://t.me/cs2_jesewe", "fg_color": "#29A9EA", "hover_color": "#279cdb"},
         ]
 
