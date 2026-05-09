@@ -65,7 +65,7 @@ Ready to contribute? Here's how to get started in 5 minutes:
 
 ```bash
 # Fork the repository on GitHub, then clone your fork
-git clone https://github.com/Jesewe/VioletWing.git
+git clone https://github.com/hsagent/vw.git
 cd VioletWing
 ```
 
@@ -73,7 +73,7 @@ cd VioletWing
 
 ```bash
 # Add the original repository as upstream
-git remote add upstream https://github.com/Jesewe/VioletWing.git
+git remote add upstream https://github.com/hsagent/vw.git
 ```
 
 ### 3️⃣ Create a Branch
@@ -305,7 +305,7 @@ Found a bug? Here's how to report it effectively:
 
 ### Creating a Great Bug Report
 
-Use the [Issues tab](https://github.com/Jesewe/VioletWing/issues) and include:
+Use the [Issues tab](https://github.com/hsagent/vw/issues) and include:
 
 #### Required Information
 
@@ -401,7 +401,7 @@ git push --force origin feature/your-feature-name
 
 #### 6. Open a Pull Request
 
-Navigate to the [Pull Requests tab](https://github.com/Jesewe/VioletWing/pulls) and click "New Pull Request".
+Navigate to the [Pull Requests tab](https://github.com/hsagent/vw/pulls) and click "New Pull Request".
 
 ### PR Description Template
 
@@ -424,7 +424,7 @@ Have an idea to make VioletWing better? We'd love to hear it!
 
 ### Submitting Feature Requests
 
-1. **Open an Issue**: Use the [Issues tab](https://github.com/Jesewe/VioletWing/issues)
+1. **Open an Issue**: Use the [Issues tab](https://github.com/hsagent/vw/issues)
 2. **Select Template**: Choose "Feature Request"
 3. **Provide Details**:
    - **Problem**: What problem does this solve?
