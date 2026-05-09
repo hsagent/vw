@@ -3,9 +3,9 @@
    <h1>VioletWing</h1>
    <p>Your ultimate assistant for Counter-Strike 2</p>
 
-[![Downloads](https://img.shields.io/github/downloads/jesewe/VioletWing/total?style=for-the-badge&logo=github&color=8E44AD)](https://github.com/Jesewe/VioletWing/releases)
-[![Latest Release](https://img.shields.io/github/v/release/jesewe/VioletWing?style=for-the-badge&logo=github&color=8E44AD)](https://github.com/Jesewe/VioletWing/releases/latest/)
-[![License](https://img.shields.io/github/license/jesewe/VioletWing?style=for-the-badge&color=8E44AD)](LICENSE)
+[![Downloads](https://img.shields.io/github/downloads/hsagent/vw/total?style=for-the-badge&logo=github&color=8E44AD)](https://github.com/hsagent/vw/releases)
+[![Latest Release](https://img.shields.io/github/v/release/hsagent/vw?style=for-the-badge&logo=github&color=8E44AD)](https://github.com/hsagent/vw/releases/latest/)
+[![License](https://img.shields.io/github/license/hsagent/vw?style=for-the-badge&color=8E44AD)](LICENSE)
 
 </div>
 
@@ -65,7 +65,7 @@ VioletWing is a training tool for Counter-Strike 2 players. It helps analyze and
 
 ### Pre-Built (Recommended)
 
-1. Go to the [Releases Page](https://github.com/Jesewe/VioletWing/releases)
+1. Go to the [Releases Page](https://github.com/hsagent/vw/releases)
 2. Download the latest `VioletWing.exe`
 3. Run it
 
