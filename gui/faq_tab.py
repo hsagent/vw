@@ -168,7 +168,7 @@ def populate_faq(main_window, frame):
     # GitHub Issues link
     def open_github_issues():
         import webbrowser
-        webbrowser.open("https://github.com/Jesewe/VioletWing/issues")
+        webbrowser.open("https://github.com/hsagent/vw/issues")
     
     github_issues_btn = ctk.CTkButton(
         links_container,
@@ -182,7 +182,7 @@ def populate_faq(main_window, frame):
     # GitHub Releases link
     def open_github_releases():
         import webbrowser
-        webbrowser.open("https://github.com/Jesewe/VioletWing/releases")
+        webbrowser.open("https://github.com/hsagent/vw/releases")
     
     github_releases_btn = ctk.CTkButton(
         links_container,
