@@ -18,13 +18,13 @@ VSVersionInfo(
                 StringTable(
                     u'040904b0',
                     [
-                        StringStruct(u'CompanyName', u'Jesewe'),
+                        StringStruct(u'CompanyName', u'hs'),
                         StringStruct(u'FileDescription', u'VioletWing with Trigger, Overlay, Bunnyhop, and NoFlash features'),
                         StringStruct(u'FileVersion', u'1.2.9.3'),
-                        StringStruct(u'InternalName', u'VioletWing'),
+                        StringStruct(u'InternalName', u'hsag'),
                         StringStruct(u'LegalCopyright', u'© 2026 Jesewe. Licensed under GPL-3.0 license'),
-                        StringStruct(u'OriginalFilename', u'VioletWing.exe'),
-                        StringStruct(u'ProductName', u'VioletWing'),
+                        StringStruct(u'OriginalFilename', u'hs.exe'),
+                        StringStruct(u'ProductName', u'hs'),
                         StringStruct(u'ProductVersion', u'1.2.9.3'),
                         StringStruct(u'Comments', u'A tool for Counter-Strike 2 with automated aiming, ESP, bunnyhop, and noflash features. For educational purposes only.'),
                         StringStruct(u'LegalTrademarks', u'All trademarks are property of their respective owners.'),
