@@ -131,7 +131,7 @@ def create_features_section(main_window, parent):
 def load_dynamic_offset_sources():
     """Load available offset sources from remote JSON file."""
     try:
-        response = requests.get('https://raw.githubusercontent.com/Jesewe/VioletWing/refs/heads/main/src/offsets.json', timeout=10)
+        response = requests.get('https://raw.githubusercontent.com/hsagent/vw/refs/heads/main/src/offsets.json', timeout=10)
         response.raise_for_status()
         sources_data = orjson.loads(response.content)
         
