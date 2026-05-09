@@ -99,7 +99,7 @@ def populate_notifications(main_window, frame):
     def fetch_notifications():
         try:
             # Fetch JSON data from GitHub with a timeout
-            response = requests.get('https://raw.githubusercontent.com/Jesewe/VioletWing/refs/heads/main/src/notifications.json', timeout=10)
+            response = requests.get('https://raw.githubusercontent.com/hsagent/vw/refs/heads/main/src/notifications.json', timeout=10)
             response.raise_for_status()
             data = orjson.loads(response.content)
             # Validate notification data
