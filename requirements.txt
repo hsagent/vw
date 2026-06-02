@@ -1,14 +1,14 @@
 keyboard==0.13.5
-packaging==26.0
+packaging==26.2
 psutil==7.2.2
 pymem==1.14.0
-pynput==1.8.1
+pynput==1.8.2
 python_dateutil==2.9.0.post0
 pywin32==311
-requests==2.33.1
+requests==2.34.2
 watchdog==6.0.0
 PyGetWindow==0.0.9
-orjson==3.11.8
+orjson==3.11.9
 customtkinter==5.2.2
 pillow==12.2.0
 pyMeow @ https://github.com/qb-0/pyMeow/releases/download/1.73.42/pyMeow-1.73.42.zip
