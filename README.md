@@ -56,7 +56,7 @@ is a training tool for Counter-Strike 2 players. It helps analyze and improve ga
 
 - Automatic offset updates fetched on startup
 - Live config reload from `config.json` without restart
-- Logs saved to `%LOCALAPPDATA%\VioletWing\logs\`
+- Logs saved to `%LOCALAPPDATA%\NewProjectName\logs\`
 - Stable and pre-release version support
 
 ---
@@ -66,7 +66,7 @@ is a training tool for Counter-Strike 2 players. It helps analyze and improve ga
 ### Pre-Built (Recommended)
 
 1. Go to the [Releases Page](https://github.com/hsagent/vw/releases)
-2. Download the latest `VioletWing.exe`
+2. Download the latest `NewProjectName.exe`
 3. Run it
 
 ### Build from Source
@@ -124,7 +124,7 @@ Settings can be changed through the GUI or by editing `config.json` directly. Ch
 | Bunnyhop inconsistent           | Ensure CS2 window has focus; verify jump key settings                         |
 | NoFlash not working             | Confirm offsets are current and feature is enabled                            |
 
-For additional help, check the FAQ tab in the application or review logs at `%LOCALAPPDATA%\VioletWing\logs\`.
+For additional help, check the FAQ tab in the application or review logs at `%LOCALAPPDATA%\NewProjectName\logs\`.
 
 ---
 
