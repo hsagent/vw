@@ -14,40 +14,54 @@ class ClientManager:
         self.features = main_window.features
 
     def _start_feature(self, feature_name, feature_obj, config):
-        """Helper method to start a single feature."""
+        """Helper method to start a single feature cleanly."""
         if not getattr(feature_obj, 'is_running', False):
             try:
                 feature_obj.config = config
-                feature_obj.is_running = True
-                thread = threading.Thread(target=feature_obj.start, daemon=True)
+                
+                # Исправление: Мы НЕ ставим feature_obj.is_running = True здесь!
+                # Теперь сам метод .start() внутри своего потока выставит этот флаг,
+                # когда успешно пройдет все проверки памяти, что предотвратит "тихий" запуск сломанных функций.
+                
+                # Специальная обработка для Overlay (pyMeow требует чистого контекста)
+                if feature_name.lower() == "overlay":
+                    # Сбрасываем stop_event перед перезапуском, если он есть
+                    if hasattr(feature_obj, 'stop_event'):
+                        feature_obj.stop_event.clear()
+                
+                thread = threading.Thread(target=feature_obj.start, daemon=True, name=f"VW_{feature_name}")
                 thread.start()
+                
                 setattr(self.main_window, f'{feature_name.lower()}_thread', thread)
-                logger.info(f"{feature_name} started.")
+                logger.info(f"Поток для функции {feature_name} успешно запущен.")
                 return True
             except Exception:
                 feature_obj.is_running = False
-                logger.exception(f"Failed to start feature: {feature_name}")
+                logger.exception(f"Не удалось запустить поток функции: {feature_name}")
                 messagebox.showerror(f"{feature_name} Error", f"Failed to start {feature_name}. Check logs for details.")
         return False
 
     def _stop_feature(self, feature_name, feature_obj):
-        """Helper method to stop a single feature."""
+        """Helper method to stop a single feature cleanly."""
         if feature_obj and getattr(feature_obj, 'is_running', False):
             try:
+                # Сигнализируем потоку о необходимости остановиться
                 feature_obj.stop()
+                
                 thread = getattr(self.main_window, f'{feature_name.lower()}_thread', None)
                 if thread and thread.is_alive():
-                    thread.join(timeout=2.0)
+                    # Даем потоку 1 секунду на нормальное завершение (чтение/запись памяти)
+                    thread.join(timeout=1.0)
                     if thread.is_alive():
-                        logger.warning(f"{feature_name} thread did not terminate cleanly.")
+                        logger.warning(f"Поток {feature_name} не завершился вовремя, будет очищен ОС при выходе.")
                     else:
-                        logger.info(f"{feature_name} thread terminated successfully.")
+                        logger.info(f"Поток {feature_name} успешно остановлен и завершен.")
+                        
                 setattr(self.main_window, f'{feature_name.lower()}_thread', None)
                 feature_obj.is_running = False
-                logger.debug(f"{feature_name} stopped.")
                 return True
             except Exception:
-                logger.exception(f"Failed to stop feature: {feature_name}")
+                logger.exception(f"Ошибка при остановке функции: {feature_name}")
                 feature_obj.is_running = False
         return False
 
@@ -57,22 +71,25 @@ class ClientManager:
             messagebox.showerror("Game Not Running", "Could not find cs2.exe process. Make sure the game is running.")
             return
 
+        # Инициализируем память. Если extract_offsets вернет None (старая структура),
+        # этот блок спасет программу от краша и выведет красивую ошибку.
         if not self.memory_manager.initialize():
-            messagebox.showerror("Initialization Error", "Failed to initialize memory manager. Please check the logs for details.")
+            messagebox.showerror("Initialization Error", "Failed to initialize memory manager. Please check if offsets are up-to-date in logs.")
             return
 
         config = ConfigManager.load_config()
         any_feature_started = False
 
         for config_key, feature_data in self.features.items():
-            if config["General"][config_key]:
+            if config["General"].get(config_key, False):
                 feature_name = feature_data["name"]
                 feature_obj = feature_data["instance"]
+                
                 if not getattr(feature_obj, 'is_running', False):
                     if self._start_feature(feature_name, feature_obj, config):
                         any_feature_started = True
                 else:
-                    logger.info(f"{feature_name} is already running.")
+                    logger.info(f"{feature_name} уже запущен.")
                     any_feature_started = True
 
         if any_feature_started:
@@ -95,7 +112,7 @@ class ClientManager:
             logger.debug("No features were running to stop.")
 
     def apply_feature_state_changes(self, old_config, new_config):
-        """Start or stop features based on configuration changes."""
+        """Start or stop features based on configuration changes on the fly."""
         game_running = Utility.is_game_running()
 
         for key, feature_data in self.features.items():
