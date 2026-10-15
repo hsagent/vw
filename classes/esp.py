@@ -19,29 +19,32 @@ ENTITY_COUNT = 64
 # Size of each entity entry in memory
 ENTITY_ENTRY_SIZE = 120
 
-# Полная оригинальная структура скелета {родительский_бон: [дочерние_боны]}
+# Полная оригинальная структура скелета {родительский_бон: [дочерние_боны]} под Source 2
 SKELETON_BONES = {
-    # Trunk Core Chain
-    6:,  # Head -> Neck
-    5:,  # Neck -> Chest
-    4:,  # Chest -> Stomach, Right Shoulder, Left Shoulder
-    3:,  # Stomach -> Center Point
-    2:,  # Center Point -> Small Head
-    1:,  # Small Head -> Pelvis 
-    # Right Hand Chain (4 points)
-    13:,  # Right Shoulder -> Right Elbow
-    14:,  # Right Elbow -> Right Wrist
-    15:,  # Right Wrist -> Right Hand 
-    # Left Arm Chain (4 points)
-    8:,  # Left Shoulder -> Left Elbow
-    9:,  # Left Elbow -> Left Wrist
-    10:,  # Left Wrist -> Left Hand
-    # Legs Chain
-    0:,  # Pelvis -> Left Hip, Right Hip
-    22:,  # Left Hip -> Left Knee
-    23:,  # Left Knee -> Left Foot
-    25:,  # Right Hip -> Right Knee
-    26:,  # Right Knee -> Right Foot
+    # Позвоночник и туловище
+    6:,   # Голова -> Шея
+    5:,   # Шея -> Грудь
+    4:,  # Грудь -> Живот, Правое плечо, Левое плечо
+    3:,   # Живот -> Центр
+    2:,   # Центр -> Поясница
+    1:,   # Поясница -> Таз
+    
+    # Правая рука
+    13:, # Правое плечо -> Правый локоть
+    14:, # Правый локоть -> Правое запястье
+    15:, # Правый запястье -> Правая кисть
+    
+    # Левая рука
+    8:,   # Левое плечо -> Левый локоть
+    9:,  # Левый локоть -> Левое запястье
+    10:, # Левое запястье -> Левая кисть
+    
+    # Ноги
+    0:,  # Таз -> Левое бедро, Правое бедро
+    22:, # Левое бедро -> Левое колено
+    23:, # Левое колено -> Левая стопа
+    25:, # Правое бедро -> Правое колено
+    26: [27]  # Правое колено -> Правая стопа
 }
 ALL_BONE_IDS = set(SKELETON_BONES.keys())
 for _bones in SKELETON_BONES.values():
