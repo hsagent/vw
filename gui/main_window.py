@@ -64,7 +64,7 @@ class MainWindow:
         # Инициализируем модули чита
         self.initialize_features()
         
-        self.root.title("VioletWing")
+        self.root.title("NewProjectName")
         self.root.resizable(True, True)
         self.root.minsize(1400, 800)
 
@@ -141,8 +141,8 @@ class MainWindow:
         title_frame = ctk.CTkFrame(left_frame, fg_color="transparent")
         title_frame.pack(side="left")
         
-        ctk.CTkLabel(title_frame, text="Violet", font=(FONT_FAMILY_BOLD, FONT_SIZE_H2, "bold"), text_color=COLOR_ACCENT_FG).pack(side="left")
-        ctk.CTkLabel(title_frame, text="Wing", font=(FONT_FAMILY_BOLD, FONT_SIZE_H2, "bold"), text_color=COLOR_TEXT_PRIMARY).pack(side="left", padx=(5, 0))
+        ctk.CTkLabel(title_frame, text="New", font=(FONT_FAMILY_BOLD, FONT_SIZE_H2, "bold"), text_color=COLOR_ACCENT_FG).pack(side="left")
+        ctk.CTkLabel(title_frame, text="ProjectName", font=(FONT_FAMILY_BOLD, FONT_SIZE_H2, "bold"), text_color=COLOR_TEXT_PRIMARY).pack(side="left", padx=(5, 0))
         
         version_badge = ctk.CTkFrame(left_frame, fg_color=("#f3e8ff", "#2d1b4e"), corner_radius=12, height=28)
         version_badge.pack(side="left", padx=(15, 0))
