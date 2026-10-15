@@ -115,51 +115,75 @@ class MemoryManager:
         else:
             logger.error("Failed to initialize offsets from extracted data.")
 
-    # ==========================================
-    # КРИТИЧЕСКИЕ МЕТОДЫ ЧТЕНИЯ И ЗАПИСИ ПАМЯТИ (RPM / WPM)
-    # ==========================================
-    def read_int(self, address: int) -> int:
+    def write_float(self, address: int, value: float) -> None:
+        """Write a float to memory (WPM)."""
         try:
-            return self.pm.read_int(address)
-        except Exception:
-            return 0
+            self.pm.write_float(address, value)
+            logger.debug(f"Wrote float {value} to address {hex(address)}")
+        except Exception as e:
+            logger.error(f"Failed to write float at address {hex(address)}: {e}")
+            raise
 
-    def read_longlong(self, address: int) -> int:
+    def write_int(self, address: int, value: int) -> None:
+        """Write an integer to memory (WPM)."""
         try:
-            return self.pm.read_longlong(address)
-        except Exception:
-            return 0
-
-    def read_vec3(self, address: int) -> Dict[str, float]:
+            self.pm.write_int(address, value)
+            logger.debug(f"Wrote int {value} to address {hex(address)}")
+        except Exception as e:
+            logger.error(f"Failed to write int at address {hex(address)}: {e}")
+            raise
+    def read_vec3(self, address: int) -> dict:
+        """Reads a 3D vector (three floats) from memory at the specified address."""
         try:
-            data = self.pm.read_bytes(address, 12)
-            x, y, z = struct.unpack('fff', data)
-            return {"x": x, "y": y, "z": z}
-        except Exception:
+            return {
+                "x": self.pm.read_float(address),
+                "y": self.pm.read_float(address + 4),
+                "z": self.pm.read_float(address + 8)
+            }
+        except Exception as e:
+            logger.debug(f"Failed to read vec3 at address {hex(address)}: {e}")
             return {"x": 0.0, "y": 0.0, "z": 0.0}
 
-    def read_string(self, address: int, max_length: int = 128) -> str:
+    def read_string(self, address: int, max_length: int = 256) -> str:
+        """Reads a null-terminated string via string pointer in CS2 (RPM)."""
         try:
-            # Читаем указатель на строку или саму строку в зависимости от контекста
             str_ptr = self.read_longlong(address)
             if not str_ptr:
                 return ""
-            return self.pm.read_string(str_ptr, max_length)
-        except Exception:
+            data = self.pm.read_bytes(str_ptr, max_length)
+            string_data = data.split(b'\x00')[0]
+            return string_data.decode('utf-8', errors='replace')
+        except Exception as e:
+            logger.debug(f"Failed to read string at address {hex(address)}: {e}")
             return ""
 
-    def write_int(self, address: int, value: int) -> bool:
+    def read_floats(self, address: int, count: int) -> list:
+        """Reads an array of `count` floats from memory."""
         try:
-            self.pm.write_int(address, value)
-            return True
-        except Exception:
-            return False
+            data = self.pm.read_bytes(address, count * 4)
+            return list(struct.unpack(f'{count}f', data))
+        except Exception as e:
+            logger.debug(f"Failed to read {count} floats at address {hex(address)}: {e}")
+            return []
 
-    # ==========================================
-    # ИСПРАВЛЕННАЯ ЛОГИКА СДВИГОВ СУЩНОСТЕЙ
-    # ==========================================
+    def read_int(self, address: int) -> int:
+        """Read an integer from memory (RPM)."""
+        try:
+            return self.pm.read_int(address)
+        except Exception as e:
+            logger.debug(f"Failed to read int at address {hex(address)}: {e}")
+            return 0
+
+    def read_longlong(self, address: int) -> int:
+        """Read a long long from memory (RPM)."""
+        try:
+            return self.pm.read_longlong(address)
+        except Exception as e:
+            logger.debug(f"Failed to read longlong at address {hex(address)}: {e}")
+            return 0
+
     def get_entity(self, index: int) -> Optional[int]:
-        """Retrieve an entity from the entity list using Source 2 grid logic."""
+        """Retrieve an entity from the entity list using updated Source 2 logic."""
         try:
             if not self.ent_list:
                 return None
@@ -167,7 +191,7 @@ class MemoryManager:
             ent_entry = self.read_longlong(self.ent_list + list_offset + 0x10)
             if not ent_entry:
                 return None
-            # Исправление: шаг сетки равен строго 120 байтам
+            # Фикс: шаг сетки равен строго 120 байтам для CS2
             entity_offset = 120 * (index & 0x1FF)
             return self.read_longlong(ent_entry + entity_offset)
         except Exception as e:
@@ -180,7 +204,6 @@ class MemoryManager:
             player = self.read_longlong(self.client_base + self.dwLocalPlayerPawn)
             if not player:
                 return None
-                
             entity_id = self.read_int(player + self.m_iIDEntIndex)
 
             if entity_id > 0:
@@ -198,11 +221,14 @@ class MemoryManager:
                     }
             return None
         except Exception as e:
-            logger.error(f"Error in fire logic: {e}")
+            if "Could not read memory at" in str(e):
+                logger.error("Game was updated, new offsets are required. Please wait for the offsets update.")
+            else:
+                logger.error(f"Error in fire logic: {e}")
             return None
 
     def get_weapon_type(self) -> str:
-        """Get the type of the currently equipped weapon with fixed index math."""
+        """Get the type of the currently equipped weapon with fixed offsets."""
         try:
             player = self.read_longlong(self.client_base + self.dwLocalPlayerPawn)
             if not player: return "Rifles"
@@ -210,6 +236,7 @@ class MemoryManager:
             weapon_services_ptr = self.read_longlong(player + self.m_pWeaponServices)
             if not weapon_services_ptr: return "Rifles"
 
+            # Фикс: Хэндл оружия занимает 4 байта (read_int вместо read_longlong)
             weapon_handle = self.read_int(weapon_services_ptr + self.m_hActiveWeapon)
             if not weapon_handle or weapon_handle == -1: return "Rifles"
 
@@ -217,7 +244,7 @@ class MemoryManager:
             list_entry = self.read_longlong(self.ent_list + 8 * ((weapon_id & 0x7FFF) >> 9) + 16)
             if not list_entry: return "Rifles"
 
-            # Исправление: здесь шаг сетки также равен 120 байтам
+            # Фикс: Шаг сетки равен строго 120 байтам
             weapon_entity_ptr = self.read_longlong(list_entry + 120 * (weapon_id & 0x1FF))
             if not weapon_entity_ptr: return "Rifles"
 
@@ -229,8 +256,19 @@ class MemoryManager:
 
             item_id = self.read_int(item_ptr + self.m_iItemDefinitionIndex)
 
-            # Таблица маппинга ID предметов под категории конфигурации
             weapon_map = {
                 1: "Pistols", 2: "Pistols", 3: "Pistols", 4: "Pistols", 30: "Pistols", 
-                32: "Pistols", 36: "Pistols", 61: "Pistols", 63: "Pistols",
-                7: "Snipers", 8: "Snipers", 40: "Snipers", 38: "Snipers",
+                32: "Pistols", 36: "Pistols", 61: "Pistols", 63: "Pistols", 64: "Pistols",
+                7: "Rifles", 8: "Rifles", 10: "Rifles", 13: "Rifles", 16: "Rifles", 39: "Rifles", 60: "Rifles",
+                9: "Snipers", 11: "Snipers", 38: "Snipers", 40: "Snipers",
+                17: "SMGs", 19: "SMGs", 23: "SMGs", 24: "SMGs", 26: "SMGs", 33: "SMGs", 34: "SMGs",
+                14: "Heavy", 25: "Heavy", 27: "Heavy", 28: "Heavy", 35: "Heavy"
+            }
+            return weapon_map.get(item_id, "Rifles")
+        except Exception:
+            return "Rifles"
+
+    @property
+    def client_dll_base(self) -> int:
+        """Get the base address of client.dll."""
+        return self.client_base
