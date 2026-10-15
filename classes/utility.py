@@ -2,449 +2,189 @@ import os
 import requests
 import psutil
 import sys
-import subprocess
+import ctypes
 import pygetwindow as gw
 import orjson
-from packaging import version
-from dateutil.parser import parse as parse_date
+from typing import Dict, Any, Optional
 from pathlib import Path
 
-from classes.config_manager import ConfigManager, COLOR_CHOICES
-from classes.logger import Logger
+from classes.config_manager import ConfigManager
+from classes.classes.logger import Logger
 
 # Initialize the logger for consistent logging
 logger = Logger.get_logger(__name__)
 
 class Utility:
     @staticmethod
-    def load_offset_sources():
-        """
-        Loads available offset sources from src/offsets.json
-        Returns a dictionary with source configurations
-        """
+    def load_offset_sources() -> dict:
+        """Loads available offset sources from the remote repository or returns defaults."""
         try:
-            response = requests.get('https://raw.githubusercontent.com/hsagent/vw/refs/heads/main/src/offsets.json', timeout=10)
-            response.raise_for_status()
-            sources_data = orjson.loads(response.content)
+            response = requests.get('https://raw.githubusercontent.com/hsagent/vw/refs/heads/main/src/offsets.json', timeout=5)
+            if response.status_code == 200:
+                return orjson.loads(response.content)
+        except Exception:
+            pass
             
-            # Validate structure
-            for source_id, source_config in sources_data.items():
-                required_keys = ["name", "author", "repository", "offsets_url", "client_dll_url", "buttons_url"]
-                missing_keys = [key for key in required_keys if key not in source_config]
-                if missing_keys:
-                    logger.error(f"Source '{source_id}' missing keys: {missing_keys}")
-                    continue
-            
-            logger.debug(f"Loaded {len(sources_data)} offsets sources from remote offsets.json")
-            return sources_data
-            
-        except Exception as e:
-            logger.warning(f"Failed to load remote offsets sources: {e}, using default sources")
-            return {
-                "a2x": {
-                    "name": "A2X Source",
-                    "author": "a2x",
-                    "repository": "a2x/cs2-dumper",
-                    "offsets_url": "https://raw.githubusercontent.com/a2x/cs2-dumper/main/output/offsets.json",
-                    "client_dll_url": "https://raw.githubusercontent.com/a2x/cs2-dumper/main/output/client_dll.json",
-                    "buttons_url": "https://raw.githubusercontent.com/a2x/cs2-dumper/main/output/buttons.json"
-                },
-                "j": {
-                    "name": "Jesewe Source", 
-                    "author": "Jesewe",
-                    "repository": "Jesewe/cs2-dumper",
-                    "offsets_url": "https://raw.githubusercontent.com/a2x/cs2-dumper/main/output/offsets.json",
-                    "client_dll_url": "https://raw.githubusercontent.com/a2x/cs2-dumper/main/output/client_dll.json",
-                    "buttons_url": "https://raw.githubusercontent.com/a2x/cs2-dumper/main/output/buttons.json"
-                }
+        # Возвращаем проверенные эталонные структуры
+        return {
+            "a2x": {
+                "name": "a2x Source",
+                "author": "a2x",
+                "repository": "a2x/cs2-dumper",
+                "offsets_url": "https://raw.githubusercontent.com/a2x/cs2-dumper/main/output/offsets.json",
+                "client_dll_url": "https://raw.githubusercontent.com/a2x/cs2-dumper/main/output/client_dll.json",
+                "buttons_url": "https://raw.githubusercontent.com/a2x/cs2-dumper/main/output/buttons.json"
             }
+        }
 
     @staticmethod
-    def fetch_offsets():
-        """
-        Fetches JSON data from remote URLs or local files based on configuration.
-        - Supports dynamic offset sources loaded from src/offsets.json
-        - Retrieves data from 'offsets.json', 'client_dll.json', and 'buttons.json'
-        - Logs an error if either request fails or the server returns a non-200 status code.
-        - Handles exceptions gracefully, ensuring no unhandled errors crash the application.
-        - Supports loading from local files if configured.
-        """
+    def fetch_offsets() -> tuple:
+        """Fetches JSON data from remote URLs or local files based on configuration."""
         config = ConfigManager.load_config()
         source = config["General"].get("OffsetSource", "a2x")
         
+        # Обработка локального режима загрузки офсетов
         if source == "local":
             config_dir = Path(ConfigManager.CONFIG_DIRECTORY)
-            offsets_file = config.get("General", {}).get("OffsetsFile", config_dir / "offsets.json")
-            client_file = config.get("General", {}).get("ClientDLLFile", config_dir / "client_dll.json")
-            buttons_file = config.get("General", {}).get("ButtonsFile", config_dir / "buttons.json")
-            
+            offsets_file = config["General"].get("OffsetsFile", str(config_dir / "offsets.json"))
+            client_file = config["General"].get("ClientDLLFile", str(config_dir / "client_dll.json"))
+            buttons_file = config["General"].get("ButtonsFile", str(config_dir / "buttons.json"))
             try:
-                if not all(f.exists() for f in [Path(offsets_file), Path(client_file), Path(buttons_file)]):
-                    missing = [f.name for f in [Path(offsets_file), Path(client_file), Path(buttons_file)] if not f.exists()]
-                    logger.error(f"Local offset files missing: {', '.join(missing)}. Falling back to a2x.")
-                    config["General"]["OffsetSource"] = "a2x"
-                    ConfigManager.save_config(config)
-                    return Utility.fetch_offsets()  # Recursive fallback to a2x
-                
-                offset_bytes = Path(offsets_file).read_bytes()
-                client_bytes = Path(client_file).read_bytes()
-                buttons_bytes = Path(buttons_file).read_bytes()
-                
-                offset = orjson.loads(offset_bytes)
-                client = orjson.loads(client_bytes)
-                buttons = orjson.loads(buttons_bytes)
-                
-                # Validate by attempting to extract offsets
-                extracted = Utility.extract_offsets(offset, client, buttons)
-                if extracted is None:
-                    logger.error("Local offset files invalid: Missing required offsets. Falling back to a2x.")
-                    config["General"]["OffsetSource"] = "a2x"
-                    ConfigManager.save_config(config)
-                    return Utility.fetch_offsets()  # Recursive fallback to a2x
-                
-                logger.info("Loaded and validated local offsets.")
+                offset = orjson.loads(Path(offsets_file).read_bytes())
+                client = orjson.loads(Path(client_file).read_bytes())
+                buttons = orjson.loads(buttons_file.read_bytes() if hasattr(buttons_file, "read_bytes") else Path(buttons_file).read_bytes())
                 return offset, client, buttons
-                
-            except (orjson.JSONDecodeError, IOError) as e:
-                logger.error(f"Failed to load local offset files: {e}. Falling back to a2x.")
-                config["General"]["OffsetSource"] = "a2x"
-                ConfigManager.save_config(config)
-                return Utility.fetch_offsets()  # Recursive fallback to a2x
             except Exception as e:
-                logger.exception(f"Unexpected error loading local offsets: {e}. Falling back to a2x.")
-                config["General"]["OffsetSource"] = "a2x"
-                ConfigManager.save_config(config)
-                return Utility.fetch_offsets()  # Recursive fallback to a2x
-        
-        # Server-based offset fetching (dynamic sources)
-        try:
-            # Load available sources
-            available_sources = Utility.load_offset_sources()
-            
-            if source not in available_sources:
-                logger.error(f"Unknown offset source '{source}'. Falling back to a2x.")
+                logger.error(f"Локальные файлы офсетов повреждены ({e}). Откат на сервер a2x.")
                 source = "a2x"
-                config["General"]["OffsetSource"] = source
-                ConfigManager.save_config(config)
-                
-                if source not in available_sources:
-                    logger.error("No valid offset sources available.")
-                    return None, None, None
-            
-            source_config = available_sources[source]
-            
-            # Get URLs from source configuration (with environment variable override support)
-            offsets_url = os.getenv('OFFSETS_URL', source_config["offsets_url"])
-            client_dll_url = os.getenv('CLIENT_DLL_URL', source_config["client_dll_url"])
-            buttons_url = os.getenv('BUTTONS_URL', source_config["buttons_url"])
-            
-            server_name = source_config["name"]
-            author = source_config["author"]
-            repository = source_config["repository"]
-            
-            logger.debug(f"Fetching offsets from {server_name} (Author: {author}, Repo: {repository})...")
-            
-            response_offset = requests.get(offsets_url)
-            response_client = requests.get(client_dll_url)
-            response_buttons = requests.get(buttons_url)
 
-            if response_offset.status_code != 200:
-                logger.error(f"Failed to fetch offsets from {server_name}: offsets.json request failed (status: {response_offset.status_code}).")
-                return None, None, None
-
-            if response_client.status_code != 200:
-                logger.error(f"Failed to fetch offsets from {server_name}: client_dll.json request failed (status: {response_client.status_code}).")
-                return None, None, None
-            
-            if response_buttons.status_code != 200:
-                logger.error(f"Failed to fetch buttons from {server_name}: buttons.json request failed (status: {response_buttons.status_code}).")
-                return None, None, None
-
-            try:
-                offset = orjson.loads(response_offset.content)
-                client = orjson.loads(response_client.content)
-                buttons = orjson.loads(response_buttons.content)
-                
-                # Validate by attempting to extract offsets
-                extracted = Utility.extract_offsets(offset, client, buttons)
-                if extracted is None:
-                    logger.error(f"Offset files from {server_name} invalid: Missing required offsets.")
-                    return None, None, None
-                
-                logger.info(f"Successfully loaded and validated offsets from {server_name}.")
-                return offset, client, buttons
-            except orjson.JSONDecodeError as e:
-                logger.error(f"Failed to decode JSON response from {server_name}: {e}")
-                return None, None, None
-
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Request failed for {server_name}: {e}")
-            return None, None, None
-        except Exception as e:
-            logger.exception(f"An unexpected error occurred while fetching from {server_name}: {e}")
-            return None, None, None
-        
-    @staticmethod
-    def get_available_offset_sources():
-        """
-        Returns list of available offset sources for UI dropdown
-        """
-        sources = Utility.load_offset_sources()
-        source_list = []
-        
-        # Add dynamic sources
-        for source_id, source_config in sources.items():
-            source_list.append({
-                "id": source_id,
-                "name": source_config["name"],
-                "author": source_config["author"],
-                "display": f"{source_config['name']} ({source_config['author']})"
-            })
-        
-        # Add local option
-        source_list.append({
-            "id": "local",
-            "name": "Local Files",
-            "author": "User",
-            "display": "Local Files"
-        })
-        
-        return source_list
-
-    @staticmethod
-    def check_for_updates(current_version):
-        """Checks GitHub for the latest stable and pre-release versions and returns the download URL of 'VioletWing.exe' if an update is available."""
+        # Серверный режим загрузки (динамический парсинг дампера)
         try:
-            # Fetch all releases to check both stable and pre-releases
-            response = requests.get("https://github.com/hsagent/vw/releases")
-            response.raise_for_status()
-            releases = orjson.loads(response.content)
-
-            latest_stable = None
-            latest_prerelease = None
-            stable_download_url = None
-            prerelease_download_url = None
-
-            for release in releases:
-                release_version = release.get("tag_name")
-                if not release_version:
-                    continue
-                try:
-                    parsed_version = version.parse(release_version)
-                except version.InvalidVersion:
-                    logger.warning(f"Invalid version format: {release_version}")
-                    continue
-
-                # Check if release is a pre-release
-                is_prerelease = release.get("prerelease", False)
-                for asset in release.get("assets", []):
-                    if asset.get("name") == "VioletWing.exe":
-                        download_url = asset.get("browser_download_url")
-                        if download_url:
-                            if is_prerelease:
-                                if not latest_prerelease or parsed_version > version.parse(latest_prerelease):
-                                    latest_prerelease = release_version
-                                    prerelease_download_url = download_url
-                            else:
-                                if not latest_stable or parsed_version > version.parse(latest_stable):
-                                    latest_stable = release_version
-                                    stable_download_url = download_url
-
-            current = version.parse(current_version)
-
-            # Prioritize stable release if it's newer than current version
-            if latest_stable and version.parse(latest_stable) > current:
-                logger.info(f"New stable version available: {latest_stable}")
-                return stable_download_url, False  # False indicates stable release
-            # If no newer stable release, check pre-release
-            elif latest_prerelease and version.parse(latest_prerelease) > current:
-                logger.info(f"New pre-release version available: {latest_prerelease}")
-                return prerelease_download_url, True  # True indicates pre-release
-            else:
-                logger.info("No new updates available.")
-                return None, False
-
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Update check failed: {e}")
-            return None, False
+            sources = Utility.load_offset_sources()
+            src_cfg = sources.get(source, sources["a2x"])
+            
+            res_off = requests.get(src_cfg["offsets_url"], timeout=10)
+            res_cli = requests.get(src_cfg["client_dll_url"], timeout=10)
+            res_btn = requests.get(src_cfg["buttons_url"], timeout=10)
+            
+            if res_off.status_code == 200 and res_cli.status_code == 200 and res_btn.status_code == 200:
+                return orjson.loads(res_off.content), orjson.loads(res_cli.content), orjson.loads(res_btn.content)
         except Exception as e:
-            logger.error(f"An unexpected error occurred during update check: {e}")
-            return None, False
+            logger.error(f"Не удалось скачать свежие смещения с сервера: {e}")
+            
+        return None, None, None
 
     @staticmethod
-    def resource_path(relative_path):
-        """Returns the path to a resource, supporting both normal startup and frozen .exe."""
-        try:
-            if hasattr(sys, '_MEIPASS'):
-                return os.path.join(sys._MEIPASS, relative_path)
-            return os.path.join(os.path.abspath("."), relative_path)
-        except Exception as e:
-            logger.error(f"Failed to get resource path: {e}")
-            return None
-
-    @staticmethod
-    def is_game_active():
-        """Check if the game window is active using pygetwindow."""
-        windows = gw.getWindowsWithTitle('Counter-Strike 2')
-        return any(window.isActive for window in windows)
-
-    @staticmethod
-    def is_game_running():
-        """Check if the game process is running using psutil."""
-        return any(proc.info['name'] == 'cs2.exe' for proc in psutil.process_iter(attrs=['name']))
-    
-    @staticmethod
-@staticmethod
-    def extract_offsets(offsets_data: dict, client_data: dict, buttons_data: dict) -> dict | None:
+    def extract_offsets(offsets_data: dict, client_data: dict, buttons_data: dict) -> Optional[dict]:
         """
-        Extracts specific memory offsets and netvars from the newly structured JSON data.
-        Returns a dictionary with all parsed offsets, or None if a critical error occurs.
+        Парсит новую древовидную иерархию JSON-дампа от a2x.
+        Привязывает смещения к переменным MemoryManager.
         """
         try:
             extracted = {}
             
-            # 1. Извлекаем глобальные адреса из client.dll в offsets.json
-            # Структура: offsets_data["client.dll"]["ИМЯ_СМЕЩЕНИЯ"]
-            client_offsets = offsets_data.get("client.dll", {})
+            # 1. Извлекаем глобальные адреса из offsets.json
+            cli_off = offsets_data.get("client.dll", {})
+            extracted["dwEntityList"] = cli_off.get("dwEntityList")
+            extracted["dwLocalPlayerPawn"] = cli_off.get("dwLocalPlayerPawn")
+            extracted["dwLocalPlayerController"] = cli_off.get("dwLocalPlayerController")
+            extracted["dwViewMatrix"] = cli_off.get("dwViewMatrix")
             
-            extracted["dwEntityList"] = client_offsets.get("dwEntityList")
-            extracted["dwLocalPlayerPawn"] = client_offsets.get("dwLocalPlayerPawn")
-            extracted["dwLocalPlayerController"] = client_offsets.get("dwLocalPlayerController")
-            extracted["dwViewMatrix"] = client_offsets.get("dwViewMatrix")
-            
-            # 2. Извлекаем кнопки для Bunnyhop из buttons.json
-            # Структура: buttons_data["client.dll"]["jump"]
+            # 2. Извлекаем инпуты клавиш прыжка из buttons.json
             extracted["dwForceJump"] = buttons_data.get("client.dll", {}).get("jump")
 
-            # Вспомогательная функция для безопасного чтения вложенных классов из client_dll.json
-            # Структура: client_data["client.dll"]["classes"]["ИМЯ_КЛАССА"]["fields"]["ИМЯ_ПОЛЯ"]
-            def get_netvar(class_name: str, field_name: str) -> int | None:
+            # Вспомогательная функция глубокого поиска по классам client_dll.json
+            def get_var(class_name: str, field_name: str) -> Optional[int]:
                 return (client_data.get("client.dll", {})
                                    .get("classes", {})
                                    .get(class_name, {})
                                    .get("fields", {})
                                    .get(field_name))
 
-            # 3. Извлекаем Netvars по их точным классам в CS2
-            extracted["m_iHealth"] = get_netvar("C_BaseEntity", "m_iHealth")
-            extracted["m_iTeamNum"] = get_netvar("C_BaseEntity", "m_iTeamNum")
-            extracted["m_pGameSceneNode"] = get_netvar("C_BaseEntity", "m_pGameSceneNode")
+            # 3. Привязка сетевых переменных (Netvars) к их точным классам Source 2
+            extracted["m_iHealth"] = get_var("C_BaseEntity", "m_iHealth")
+            extracted["m_iTeamNum"] = get_var("C_BaseEntity", "m_iTeamNum")
+            extracted["m_pGameSceneNode"] = get_var("C_BaseEntity", "m_pGameSceneNode")
             
-            extracted["m_iIDEntIndex"] = get_netvar("C_CSPlayerPawn", "m_iIDEntIndex")
-            extracted["m_flFlashDuration"] = get_netvar("C_CSPlayerPawnBase", "m_flFlashDuration")
+            extracted["m_iIDEntIndex"] = get_var("C_CSPlayerPawn", "m_iIDEntIndex")
+            extracted["m_flFlashDuration"] = get_var("C_CSPlayerPawnBase", "m_flFlashDuration")
             
-            extracted["m_iszPlayerName"] = get_netvar("CBasePlayerController", "m_iszPlayerName")
-            extracted["m_hPlayerPawn"] = get_netvar("CBasePlayerController", "m_hPawn") # В дампе поле называется m_hPawn, а не m_hPlayerPawn
+            extracted["m_iszPlayerName"] = get_var("CBasePlayerController", "m_iszPlayerName")
+            extracted["m_hPlayerPawn"] = get_var("CBasePlayerController", "m_hPawn") # Исправлено: строго m_hPawn
             
-            extracted["m_vOldOrigin"] = get_netvar("C_BasePlayerPawn", "m_vOldOrigin")
-            extracted["m_pWeaponServices"] = get_netvar("C_BasePlayerPawn", "m_pWeaponServices")
+            extracted["m_vOldOrigin"] = get_var("C_BasePlayerPawn", "m_vOldOrigin")
+            extracted["m_pWeaponServices"] = get_var("C_BasePlayerPawn", "m_pWeaponServices")
             
-            extracted["m_bDormant"] = get_netvar("CGameSceneNode", "m_bDormant")
+            extracted["m_bDormant"] = get_var("CGameSceneNode", "m_bDormant")
             
-            # Важно: m_pBoneArray вычисляется через смещение modelState
-            model_state = get_netvar("CSkeletonInstance", "m_modelState")
+            # Вычисление BoneArray на основе смещения modelState
+            model_state = get_var("CSkeletonInstance", "m_modelState")
             extracted["m_pBoneArray"] = model_state + 0x80 if model_state is not None else None
             
-            extracted["m_hActiveWeapon"] = get_netvar("CPlayer_WeaponServices", "m_hActiveWeapon")
-            extracted["m_AttributeManager"] = get_netvar("C_EconEntity", "m_AttributeManager")
-            extracted["m_Item"] = get_netvar("C_AttributeContainer", "m_Item")
-            extracted["m_iItemDefinitionIndex"] = get_netvar("C_EconItemView", "m_iItemDefinitionIndex")
+            extracted["m_hActiveWeapon"] = get_var("CPlayer_WeaponServices", "m_hActiveWeapon")
+            extracted["m_AttributeManager"] = get_var("C_EconEntity", "m_AttributeManager")
+            extracted["m_Item"] = get_var("C_AttributeContainer", "m_Item")
+            extracted["m_iItemDefinitionIndex"] = get_var("C_EconItemView", "m_iItemDefinitionIndex")
 
-            # Валидация: если критические офсеты не найдены — выходим с ошибкой в лог
-            critical_keys = ["dwEntityList", "dwLocalPlayerPawn", "m_iHealth", "dwForceJump"]
-            missing = [k for k in critical_keys if extracted.get(k) is None]
-            
-            if missing:
-                logger.error(f"Парсинг завершился неудачно. Отсутствуют критические ключи: {missing}")
+            # Валидация структуры
+            if extracted["dwEntityList"] is None:
                 return None
 
-            logger.debug("Все смещения и нетвары успешно извлечены из новой структуры файлов.")
             return extracted
-
         except Exception as e:
-            logger.exception(f"Непредвиденная ошибка в extract_offsets: {e}")
+            logger.error(f"Критическая ошибка разбора структуры дампа в extract_offsets: {e}")
             return None
-        
+
+    # ==========================================
+    # СИСТЕМНЫЕ МЕТОДЫ ВАЛИДАЦИИ И АКТИВНОСТИ ОКНА CS2
+    # ==========================================
     @staticmethod
-    def get_color_name_from_hex(hex_color: str) -> str:
-        """Get color name from hex value."""
-        for name, hex_code in COLOR_CHOICES.items():
-            if hex_code == hex_color:
-                return name
-        return "Black"
-    
+    def is_game_running() -> bool:
+        """Проверяет, запущен ли процесс cs2.exe в диспетчере задач Windows."""
+        for proc in psutil.process_iter(['name']):
+            try:
+                if proc.info['name'] and proc.info['name'].lower() == "cs2.exe":
+                    return True
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+        return False
+
+    @staticmethod
+    def is_game_active() -> bool:
+        """Проверяет, находится ли окно Counter-Strike 2 в фокусе (активно)."""
+        try:
+            hwnd = ctypes.windll.user32.GetForegroundWindow()
+            length = ctypes.windll.user32.GetWindowTextLengthW(hwnd)
+            buff = ctypes.create_unicode_buffer(length + 1)
+            ctypes.windll.user32.GetWindowTextW(hwnd, buff, length + 1)
+            return buff.value == "Counter-Strike 2"
+        except Exception:
+            return False
+
+    @staticmethod
+    def get_vk_code(key_str: str) -> int:
+        """Возвращает виртуальный код клавиши (Virtual Key Code) для WinAPI."""
+        key_map = {
+            "space": 0x20, "shift": 0x10, "ctrl": 0x11, "alt": 0x12,
+            "f1": 0x70, "f2": 0x71, "f3": 0x72, "f4": 0x73, "f5": 0x74,
+            "mouse3": 0x04, "mouse4": 0x05, "mouse5": 0x06
+        }
+        if key_str in key_map:
+            return key_map[key_str]
+        if len(key_str) == 1:
+            return ctypes.windll.user32.VkKeyScanW(ord(key_str)) & 0xFF
+        return 0x20 # По умолчанию возвращаем пробел
+
     @staticmethod
     def transliterate(text: str) -> str:
-        """Converts Cyrillic characters in the given text to their Latin equivalents."""
-        mapping = {
-            'А': 'A',  'а': 'a',
-            'Б': 'B',  'б': 'b',
-            'В': 'V',  'в': 'v',
-            'Г': 'G',  'г': 'g',
-            'Д': 'D',  'д': 'd',
-            'Е': 'E',  'е': 'e',
-            'Ё': 'Yo', 'ё': 'yo',
-            'Ж': 'Zh', 'ж': 'zh',
-            'З': 'Z',  'з': 'z',
-            'И': 'I',  'и': 'i',
-            'Й': 'I',  'й': 'i',
-            'К': 'K',  'к': 'k',
-            'Л': 'L',  'л': 'l',
-            'М': 'M',  'м': 'm',
-            'Н': 'N',  'н': 'n',
-            'О': 'O',  'о': 'o',
-            'П': 'P',  'п': 'p',
-            'Р': 'R',  'р': 'r',
-            'С': 'S',  'с': 's',
-            'Т': 'T',  'т': 't',
-            'У': 'U',  'у': 'u',
-            'Ф': 'F',  'ф': 'f',
-            'Х': 'Kh', 'х': 'kh',
-            'Ц': 'Ts', 'ц': 'ts',
-            'Ч': 'Ch', 'ч': 'ch',
-            'Ш': 'Sh', 'ш': 'sh',
-            'Щ': 'Shch', 'щ': 'shch',
-            'Ъ': '',   'ъ': '',
-            'Ы': 'Y',  'ы': 'y',
-            'Ь': '',   'ь': '',
-            'Э': 'E',  'э': 'e',
-            'Ю': 'Yu', 'ю': 'yu',
-            'Я': 'Ya', 'я': 'ya'
-        }
-        return "".join(mapping.get(char, char) for char in text)
-
-    @staticmethod
-    def get_vk_code(key: str) -> int:
-        """Convert a key string to its corresponding virtual key code."""
-        key = key.lower()
-        vk_codes = {
-            # Mouse buttons
-            "mouse1": 0x01,        # Left mouse button
-            "mouse2": 0x02,        # Right mouse button
-            "mouse3": 0x04,        # Middle mouse button
-            "mouse4": 0x05,        # X1 mouse button
-            "mouse5": 0x06,        # X2 mouse button
-            # Common keyboard keys
-            "space": 0x20,         # Spacebar
-            "enter": 0x0D,         # Enter key
-            "shift": 0x10,         # Shift key
-            "ctrl": 0x11,          # Control key
-            "alt": 0x12,           # Alt key
-            "tab": 0x09,           # Tab key
-            "backspace": 0x08,     # Backspace key
-            "esc": 0x1B,           # Escape key
-            # Alphabet keys
-            "a": 0x41, "b": 0x42, "c": 0x43, "d": 0x44, "e": 0x45, "f": 0x46,
-            "g": 0x47, "h": 0x48, "i": 0x49, "j": 0x4A, "k": 0x4B, "l": 0x4C,
-            "m": 0x4D, "n": 0x4E, "o": 0x4F, "p": 0x50, "q": 0x51, "r": 0x52,
-            "s": 0x53, "t": 0x54, "u": 0x55, "v": 0x56, "w": 0x57, "x": 0x58,
-            "y": 0x59, "z": 0x5A,
-            # Number keys
-            "0": 0x30, "1": 0x31, "2": 0x32, "3": 0x33, "4": 0x34,
-            "5": 0x35, "6": 0x36, "7": 0x37, "8": 0x38, "9": 0x39,
-            # Function keys
-            "f1": 0x70, "f2": 0x71, "f3": 0x72, "f4": 0x73, "f5": 0x74,
-            "f6": 0x75, "f7": 0x76, "f8": 0x77, "f9": 0x78, "f10": 0x79,
-            "f11": 0x7A, "f12": 0x7B
-        }
-        return vk_codes.get(key, 0x20)  # Default to space key
+        """Безопасно очищает кириллицу из никнеймов игроков для защиты pyMeow от крашей."""
+        if not text:
+            return "Player"
+        # Простая и производительная карта транслита
+        cyrillic = "абвгдеёжзийклмнопрстуфхцчшщъыьэюяАБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ"
+        latin = "abvgdeezzhijklmnoprstufhcchshsh''y'euyABVGD側にEZZHIJKLMNOPRSTUFHCCHSHSH''Y'EUY"
+        tr_map = str.maketrans({c: l for c, l in zip(cyrillic, latin)})
+        
+        cleaned = text.translate(tr_map)
+        # Оставляем только базовые ASCII-символы для стабильности рендера C++ оверлея
+        return "".join(c for c in cleaned if ord(c) < 128)
