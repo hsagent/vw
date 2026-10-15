@@ -18,7 +18,7 @@ from classes.trigger_bot import CS2TriggerBot
 from classes.esp import CS2Overlay
 from classes.bunnyhop import CS2Bunnyhop
 from classes.noflash import CS2NoFlash
-from classes.config_manager import ConfigManager, COLOR_CHOICES
+from classes.config_manager import ConfigManager
 from classes.file_watcher import ConfigFileChangeHandler
 from classes.logger import Logger
 from classes.memory_manager import MemoryManager
@@ -390,6 +390,7 @@ class MainWindow:
             except ValueError: pass
             settings['WeaponSettings'][w_type] = w_set
     def _update_overlay_config_from_ui(self, config):
+        """Safely saves overlay colors and settings from UI widgets using ConfigManager palette."""
         settings = config["Overlay"]
         widgets = getattr(self, 'overlay_widgets', {})
         def get_val(key, v_type):
@@ -404,9 +405,15 @@ class MainWindow:
         for k in ["box_line_thickness", "target_fps"]:
             val = get_val(k, "widget")
             if val is not None: settings[k] = val
+            
+        # Локальный импорт палитры для исключения Circular Import
+        import classes.config_manager as cm
+        color_choices_palette = getattr(cm, "COLOR_CHOICES", {})
+        
         for k, d_col in {"box_color_hex": "#FFA500", "snaplines_color_hex": "#FFFFFF", "text_color_hex": "#FFFFFF", "teammate_color_hex": "#00FFFF"}.items():
             val = get_val(k, "widget")
-            if val is not None: settings[k] = COLOR_CHOICES.get(val, d_col)
+            if val is not None: 
+                settings[k] = color_choices_palette.get(val, d_col)
 
     def _update_additional_config_from_ui(self, config):
         b_set = config.get("Bunnyhop", {})
