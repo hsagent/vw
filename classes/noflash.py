@@ -18,22 +18,21 @@ class CS2NoFlash:
         """
         Initialize the NoFlash with a shared MemoryManager instance.
         """
-        # Load the configuration settings
         self.config = ConfigManager.load_config()
         self.memory_manager = memory_manager
         self.is_running = False
         self.stop_event = threading.Event()
         self.local_player_address: Optional[int] = None
-        self.flash_duration_address: Optional[int] = None
         
         # Cache offset
         self.flash_duration_offset: Optional[int] = None
-        
         self.load_configuration()
 
     def load_configuration(self):
         """Load and apply configuration settings."""
-        self.flash_suppression_strength = self.config.get("NoFlash", {}).get("FlashSuppressionStrength", 0.0)
+        # Значение 0.0 означает полную слепоту (Suppression), 
+        # однако новые структуры дампа хранят силу suppresion_strength
+        self.flash_suppression_strength = float(self.config.get("NoFlash", {}).get("FlashSuppressionStrength", 0.0))
 
     def update_config(self, config):
         """Update the configuration settings."""
@@ -48,50 +47,37 @@ class CS2NoFlash:
             return False
         try:
             self.local_player_address = self.memory_manager.client_base + self.memory_manager.dwLocalPlayerPawn
-            # Cache the offset
             self.flash_duration_offset = self.memory_manager.m_flFlashDuration
             return True
         except Exception as e:
             logger.error(f"Error setting local player address: {e}")
             return False
 
-    def disable_flash(self, player_position: int) -> bool:
-        """Set the flash duration based on suppression strength."""
-        try:
-            self.memory_manager.write_float(
-                player_position + self.flash_duration_offset, 
-                self.flash_suppression_strength
-            )
-            return True
-        except Exception as e:
-            logger.error(f"Error disabling flash: {e}")
-            return False
-
     def start(self) -> None:
-        """Start the NoFlash."""
+        """Start the NoFlash thread loop."""
         if not self.initialize_local_player():
             logger.error("Failed to initialize local player address.")
             return
 
         self.is_running = True
+        self.stop_event.clear()
 
-        # Cache frequently
+        # Cache frequently used functions
         is_game_active = Utility.is_game_active
         sleep = time.sleep
         read_longlong = self.memory_manager.read_longlong
+        write_float = self.memory_manager.write_float
         
-        # Cache local variables
         local_player_addr = self.local_player_address
         flash_offset = self.flash_duration_offset
-        suppression_value = self.flash_suppression_strength
         
-        # Performance tracking
-        last_player_position = 0
         failed_reads = 0
-        max_failed_reads = 10  # Reinitialize after too many failures
-        reinit_backoff = 0.1  # Start with 100ms backoff after reinit
-        max_reinit_backoff = 5.0  # Max 5 seconds between reinit attempts
-        logged_waiting = False  # Avoid spamming "waiting for player" logs
+        max_failed_reads = 10
+        reinit_backoff = 0.1
+        max_reinit_backoff = 5.0
+        logged_waiting = False
+
+        logger.info("Фоновый поток функции NoFlash успешно запущен.")
 
         while not self.stop_event.is_set():
             try:
@@ -100,37 +86,35 @@ class CS2NoFlash:
                     logged_waiting = False
                     continue
 
-                # Read player position
+                # Читаем указатель на базовый адрес нашей пешки (Pawn)
                 player_position = read_longlong(local_player_addr)
 
                 if player_position and player_position > 0:
-                    # Reset failure counter and backoff on successful read
                     if failed_reads > 0:
                         failed_reads = 0
                         reinit_backoff = 0.1
                         logged_waiting = False
 
-                    # Only write if player position changed or first time
-                    if player_position != last_player_position:
-                        last_player_position = player_position
+                    # Читаем текущее значение m_flFlashDuration из игры
+                    current_flash = self.memory_manager.pm.read_float(player_position + flash_offset)
+                    
+                    # ИСПРАВЛЕНИЕ: Прямое чтение self.flash_suppression_strength вместо локальной переменной
+                    # Позволяет на лету менять степень suppression_strength из интерфейса
+                    target_flash = self.flash_suppression_strength
 
-                    # Write flash duration
-                    try:
-                        self.memory_manager.write_float(
-                            player_position + flash_offset,
-                            suppression_value
-                        )
-                    except Exception as e:
-                        logger.debug(f"Error writing flash duration: {e}")
-                        failed_reads += 1
+                    # Записываем значение только если игрока ослепило (чтобы не перегружать шину памяти WPM)
+                    if current_flash > target_flash:
+                        try:
+                            write_float(player_position + flash_offset, target_flash)
+                        except Exception as e:
+                            logger.debug(f"Error writing flash duration: {e}")
+                            failed_reads += 1
                 else:
-                    # Invalid player position
                     failed_reads += 1
 
-                    # Reinitialize if too many failures
                     if failed_reads >= max_failed_reads:
                         if not logged_waiting:
-                            logger.warning("Player not found, waiting for spawn...")
+                            logger.warning("NoFlash: Локальный плеер Pawn не найден, ожидаем спавна на карте...")
                             logged_waiting = True
                         if self.initialize_local_player():
                             local_player_addr = self.local_player_address
@@ -143,7 +127,7 @@ class CS2NoFlash:
                 sleep(NOFLASH_LOOP_SLEEP)
 
             except Exception as e:
-                logger.error(f"Unexpected error in main loop: {e}", exc_info=True)
+                logger.error(f"Unexpected error in NoFlash loop: {e}", exc_info=True)
                 failed_reads += 1
                 sleep(NOFLASH_LOOP_SLEEP)
 
