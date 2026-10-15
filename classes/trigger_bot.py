@@ -82,9 +82,10 @@ class CS2TriggerBot:
         except Exception as e:
             logger.error(f"Error playing toggle sound: {e}")
 
-    def should_trigger(self, entity_team: int, player_team: int, entity_health: int) -> bool:
+        def should_trigger(self, entity_team: int, player_team: int, entity_health: int) -> bool:
         """Determine if the bot should fire."""
-        return (self.attack_on_teammates or entity_team != player_team) and 0  Dict[str, Any]:
+        # Условие: (разрешен огонь по своим ИЛИ команда цели не равна команде игрока) И здоровье цели в диапазоне от 1 до 100
+        return (self.attack_on_teammates or entity_team != player_team) and 0 < entity_health <= 100
         """Get weapon settings with caching for performance."""
         if weapon_type != self.last_weapon_type:
             self.current_weapon_settings = self.weapon_settings_cache.get(
