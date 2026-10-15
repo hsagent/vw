@@ -82,10 +82,13 @@ class CS2TriggerBot:
         except Exception as e:
             logger.error(f"Error playing toggle sound: {e}")
 
-        def should_trigger(self, entity_team: int, player_team: int, entity_health: int) -> bool:
+    def is_trigger_key_pressed(self) -> bool:
+        """Check if trigger key is pressed using fast WinAPI async key states."""
+        return bool(ctypes.windll.user32.GetAsyncKeyState(self._trigger_vk_code) & 0x8000)
+
+    def should_trigger(self, entity_team: int, player_team: int, entity_health: int) -> bool:
         """Determine if the bot should fire."""
-        # Условие: (разрешен огонь по своим ИЛИ команда цели не равна команде игрока) И здоровье цели в диапазоне от 1 до 100
-        return (self.attack_on_teammates or entity_team != player_team) and 0 < entity_health <= 100
+        return (self.attack_on_teammates or entity_team != player_team) and 0  Dict[str, Any]:
         """Get weapon settings with caching for performance."""
         if weapon_type != self.last_weapon_type:
             self.current_weapon_settings = self.weapon_settings_cache.get(
@@ -94,12 +97,6 @@ class CS2TriggerBot:
             self.last_weapon_type = weapon_type
             logger.debug(f"TriggerBot weapon profile switched to: {weapon_type}")
         return self.current_weapon_settings
-
-    def should_trigger(self, entity_team: int, player_team: int, entity_health: int) -> bool:
-        """Determine if the bot should fire."""
-        # Проверяем условия ведения огня: (атака по тимейтам разрешена ИЛИ это враг) И здоровье в рамках нормы (от 1 до 100)
-        return (self.attack_on_teammates or entity_team != player_team) and 0 < entity_health <= 100
-
     def start(self) -> None:
         """Start the TriggerBot high-performance loop."""
         self.is_running = True
