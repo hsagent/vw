@@ -9,7 +9,7 @@ import threading
 @dataclass
 class LoggerConfig:
     """Configuration for the Logger class."""
-    log_directory: str = os.path.expanduser(r'~\AppData\Local\VioletWing\logs')
+    log_directory: str = os.path.expanduser(r'~\AppData\Local\NewProjectName\logs')
     max_bytes: int = 5 * 1024 * 1024  # 5MB
     backup_count: int = 5
     clear_on_startup: bool = False     # ИСПРАВЛЕНИЕ: Переводим в False, чтобы не затирать логи крашей прошлых сессий игры!
@@ -57,7 +57,7 @@ class Logger:
     @classmethod
     def DETAILED_LOG_FILE(cls) -> str:
         log_dir = cls._config.log_directory if cls._config else LoggerConfig().log_directory
-        return os.path.join(log_dir, 'violetwing_detailed.log')
+        return os.path.join(log_dir, 'NewProjectName_detailed.log')
     
     @staticmethod
     def _clear_existing_logs(log_files: List[str], backup_count: int) -> None:
@@ -131,7 +131,7 @@ class Logger:
             datefmt='%Y-%m-%d %H:%M:%S'
         )
         
-        # 1. Основной хэндлер логов (violetwing.log)
+        # 1. Основной хэндлер логов (NewProjectName.log)
         standard_handler = Logger._create_file_handler(
             Logger.LOG_FILE(), cfg.file_level, detailed_formatter, cfg.max_bytes, cfg.backup_count
         )
@@ -154,7 +154,7 @@ class Logger:
         console_handler.addFilter(SuppressErrorFilter(cfg.suppress_patterns))
         root_logger.addHandler(console_handler)
         
-        logging.getLogger(__name__).info("violetwing sub-logging systems initialized successfully.")
+        logging.getLogger(__name__).info("NewProjectName sub-logging systems initialized successfully.")
 
     @staticmethod
     def get_logger(name: str) -> logging.Logger:
