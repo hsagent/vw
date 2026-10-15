@@ -5,7 +5,7 @@ import keyboard
 import struct
 from typing import Iterator, Optional, Dict
 
-from classes.config_manager import ConfigManager, Colors, COLOR_CHOICES
+from classes.config_manager import ConfigManager
 from classes.memory_manager import MemoryManager
 from classes.logger import Logger
 from classes.utility import Utility
@@ -281,59 +281,13 @@ class CS2Overlay:
             overlay.draw_rectangle(bar_x, bar_y, bar_width, bar_height, overlay.get_color("black"))
             health_percent = max(0, min(entity.health, 100))
             fill_height = (health_percent / 100.0) * bar_height
-            fill_color = overlay.get_color("red" if health_percent  None:
-        """Start the Overlay rendering loop."""
-        self.is_running = True
-        self.stop_event.clear()
-
-        try:
-            overlay.overlay_init("Counter-Strike 2", fps=0)
+                        # Определение цвета полоски в зависимости от уровня здоровья (ms)
+            fill_color = overlay.get_color("red" if health_percent <= 20 else "yellow" if health_percent <= 50 else "green")
+            overlay.draw_rectangle(bar_x, bar_y + (bar_height - fill_height), bar_width, fill_height, fill_color)
+            
+            if self.draw_health_numbers:
+                overlay.draw_text(f"{entity.health}", int(bar_x - 22), int(bar_y + bar_height / 2 - 5), 10, text_color)
         except Exception as e:
-            logger.error(f"Overlay initialization error: {e}")
-            self.is_running = False
-            return
+            logger.debug(f"Error drawing entity: {e}")
 
-        frame_time = 1.0 / self.target_fps
-        is_game_active = Utility.is_game_active
-        sleep = time.sleep
-        logger.info("Фоновый прозрачный оверлей ESP Wallhack успешно запущен.")
-
-        while not self.stop_event.is_set():
-            start_time = time.time()
-            try:
-                if not is_game_active():
-                    sleep(0.05)
-                    continue
-
-                view_matrix = self.memory_manager.read_floats(self.memory_manager.client_base + self.memory_manager.dwViewMatrix, 16)
-                local_controller_ptr = self.memory_manager.read_longlong(self.memory_manager.client_base + self.memory_manager.dwLocalPlayerController)
-                
-                if local_controller_ptr:
-                    local_pawn_ptr = self.memory_manager.read_longlong(self.memory_manager.client_base + self.memory_manager.dwLocalPlayerPawn)
-                    self.local_team = self.memory_manager.read_int(local_pawn_ptr + self.memory_manager.m_iTeamNum) if local_pawn_ptr else None
-                else:
-                    self.local_team = None
-
-                entities = list(self.iterate_entities(local_controller_ptr))
-
-                if overlay.overlay_loop():
-                    overlay.begin_drawing()
-                    for entity in entities:
-                        is_teammate = self.local_team is not None and entity.team == self.local_team
-                        if is_teammate and not self.draw_teammates:
-                            continue
-                        self.draw_entity(entity, view_matrix, is_teammate)
-                    overlay.end_drawing()
-
-                sleep_time = frame_time - (time.time() - start_time)
-                if sleep_time > 0: sleep(sleep_time)
-            except Exception as e:
-                logger.error(f"Unexpected error in overlay loop: {e}")
-                sleep(MAIN_LOOP_SLEEP)
-
-        overlay.overlay_close()
-
-    def stop(self) -> None:
-        """Stop the Overlay."""
-        self.is_running = False
-        self.stop_event.set()
+    
