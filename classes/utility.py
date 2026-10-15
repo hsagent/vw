@@ -9,7 +9,8 @@ from packaging import version
 from dateutil.parser import parse as parse_date
 from pathlib import Path
 
-from classes.config_manager import ConfigManager, COLOR_CHOICES
+# ИСПРАВЛЕНИЕ: Удален импорт COLOR_CHOICES для предотвращения Circular ImportError
+from classes.config_manager import ConfigManager
 from classes.logger import Logger
 
 # Initialize the logger for consistent logging
@@ -160,11 +161,7 @@ class Utility:
                 "m_AttributeManager": get_field("C_EconEntity", "m_AttributeManager"),
                 "m_Item": get_field("C_AttributeContainer", "m_Item"),
                 "m_iItemDefinitionIndex": get_field("C_EconItemView", "m_iItemDefinitionIndex"),
-                
-                # ИСПРАВЛЕНИЕ: Поле в CBasePlayerController называется строго m_hPawn, а не m_hPlayerPawn
                 "m_hPlayerPawn": get_field("CBasePlayerController", "m_hPawn"),
-                
-                # Вычисление BoneArray на основе смещения modelState
                 "m_pBoneArray": get_field("CSkeletonInstance", "m_modelState") + 0x80
             }
 
@@ -184,7 +181,11 @@ class Utility:
         
     @staticmethod
     def get_color_name_from_hex(hex_color: str) -> str:
-        for name, hex_code in COLOR_CHOICES.items():
+        # ИСПРАВЛЕНИЕ: Безопасное чтение глобального словаря цветов из импортированного модуля config_manager
+        import classes.config_manager as cm
+        color_choices_dict = getattr(cm, "COLOR_CHOICES", {})
+        
+        for name, hex_code in color_choices_dict.items():
             if hex_code == hex_color:
                 return name
         return "Black"
@@ -203,7 +204,7 @@ class Utility:
             'Э': 'E', 'э': 'e', 'Ю': 'Yu', 'ю': 'yu', 'Я': 'Ya', 'я': 'ya', 'ъ': '', 'ъ': '', 'ь': '', 'ь': ''
         }
         cleaned = "".join(mapping.get(char, char) for char in text)
-        return "".join(c for c in cleaned if ord(c) < 128) # Строгая ASCII очистка для pyMeow
+        return "".join(c for c in cleaned if ord(c) < 128)
 
     @staticmethod
     def get_vk_code(key: str) -> int:
@@ -216,7 +217,7 @@ class Utility:
             "i": 0x49, "j": 0x4A, "k": 0x4B, "l": 0x4C, "m": 0x4D, "n": 0x4E, "o": 0x4F, "p": 0x50,
             "q": 0x51, "r": 0x52, "s": 0x53, "t": 0x54, "u": 0x55, "v": 0x56, "w": 0x57, "x": 0x58,
             "y": 0x59, "z": 0x5A,
-            "0": 0x30, "1": 0x31, "2": 0x32, "3": 0x33, "4": 0x34, "5": 0x35, "6": 0x36, "7": 0x37, "8": 0x38, "9": 0x39,
+            "0": 0x30, "1": 0x31, "2": 0x32, "3": 0x33, "4": 0x34, "5": 0x35, "6": 0x37, "7": 0x37, "8": 0x38, "9": 0x39,
             "f1": 0x70, "f2": 0x71, "f3": 0x72, "f4": 0x73, "f5": 0x74, "f6": 0x75, "f7": 0x76, "f8": 0x77, "f9": 0x78,
             "f10": 0x79, "f11": 0x7A, "f12": 0x7B
         }
