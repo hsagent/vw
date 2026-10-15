@@ -5,6 +5,7 @@ from classes.utility import Utility
 from classes.logger import Logger
 from classes.config_manager import ConfigManager
 
+# Initialize the logger for consistent logging
 logger = Logger.get_logger(__name__)
 
 class ClientManager:
@@ -14,67 +15,64 @@ class ClientManager:
         self.features = main_window.features
 
     def _start_feature(self, feature_name, feature_obj, config):
-        """Helper method to start a single feature cleanly."""
+        """Helper method to start a single feature cleanly with descriptive thread naming."""
         if not getattr(feature_obj, 'is_running', False):
             try:
                 feature_obj.config = config
                 
-                # Исправление: Мы НЕ ставим feature_obj.is_running = True здесь!
-                # Теперь сам метод .start() внутри своего потока выставит этот флаг,
-                # когда успешно пройдет все проверки памяти, что предотвратит "тихий" запуск сломанных функций.
+                # Специальный сброс событий остановки для тяжелых окон оверлеев pyMeow
+                if feature_name.lower() == "overlay" and hasattr(feature_obj, 'stop_event'):
+                    feature_obj.stop_event.clear()
                 
-                # Специальная обработка для Overlay (pyMeow требует чистого контекста)
-                if feature_name.lower() == "overlay":
-                    # Сбрасываем stop_event перед перезапуском, если он есть
-                    if hasattr(feature_obj, 'stop_event'):
-                        feature_obj.stop_event.clear()
+                # ИСПРАВЛЕНИЕ: Мы НЕ ставим feature_obj.is_running = True здесь.
+                # Теперь сам метод .start() внутри своего изолированного потока выставит этот флаг,
+                # когда успешно инициализирует дескрипторы WinAPI/pyMeow.
                 
+                # Создаем именованный поток для упрощения глобальной отладки в логах
                 thread = threading.Thread(target=feature_obj.start, daemon=True, name=f"VW_{feature_name}")
                 thread.start()
                 
                 setattr(self.main_window, f'{feature_name.lower()}_thread', thread)
-                logger.info(f"Поток для функции {feature_name} успешно запущен.")
+                logger.info(f"Фоновый поток подсистемы {feature_name} успешно запущен.")
                 return True
             except Exception:
                 feature_obj.is_running = False
-                logger.exception(f"Не удалось запустить поток функции: {feature_name}")
+                logger.exception(f"Failed to start feature: {feature_name}")
                 messagebox.showerror(f"{feature_name} Error", f"Failed to start {feature_name}. Check logs for details.")
         return False
 
     def _stop_feature(self, feature_name, feature_obj):
-        """Helper method to stop a single feature cleanly."""
+        """Helper method to stop a single feature cleanly with safe timeouts."""
         if feature_obj and getattr(feature_obj, 'is_running', False):
             try:
-                # Сигнализируем потоку о необходимости остановиться
                 feature_obj.stop()
-                
                 thread = getattr(self.main_window, f'{feature_name.lower()}_thread', None)
                 if thread and thread.is_alive():
-                    # Даем потоку 1 секунду на нормальное завершение (чтение/запись памяти)
+                    # Даем потоку чтения памяти 1 секунду на безопасный выход из цикла RPM/WPM
                     thread.join(timeout=1.0)
                     if thread.is_alive():
-                        logger.warning(f"Поток {feature_name} не завершился вовремя, будет очищен ОС при выходе.")
+                        logger.warning(f"{feature_name} thread did not terminate cleanly in time.")
                     else:
-                        logger.info(f"Поток {feature_name} успешно остановлен и завершен.")
-                        
+                        logger.info(f"Поток {feature_name} успешно остановлен и выгружен.")
+                
                 setattr(self.main_window, f'{feature_name.lower()}_thread', None)
                 feature_obj.is_running = False
+                logger.debug(f"{feature_name} stopped.")
                 return True
             except Exception:
-                logger.exception(f"Ошибка при остановке функции: {feature_name}")
+                logger.exception(f"Failed to stop feature: {feature_name}")
                 feature_obj.is_running = False
         return False
-
     def start_client(self):
         """Start selected features based on General settings, ensuring no duplicates."""
         if not Utility.is_game_running():
             messagebox.showerror("Game Not Running", "Could not find cs2.exe process. Make sure the game is running.")
             return
 
-        # Инициализируем память. Если extract_offsets вернет None (старая структура),
-        # этот блок спасет программу от краша и выведет красивую ошибку.
+        # Инициализируем RPM-подключение к Source 2. Если extract_offsets выбросит None,
+        # этот блок не даст программе упасть, выведя понятную ошибку пользователю.
         if not self.memory_manager.initialize():
-            messagebox.showerror("Initialization Error", "Failed to initialize memory manager. Please check if offsets are up-to-date in logs.")
+            messagebox.showerror("Initialization Error", "Failed to initialize memory manager. Please check if your JSON offsets are valid.")
             return
 
         config = ConfigManager.load_config()
@@ -89,7 +87,7 @@ class ClientManager:
                     if self._start_feature(feature_name, feature_obj, config):
                         any_feature_started = True
                 else:
-                    logger.info(f"{feature_name} уже запущен.")
+                    logger.info(f"{feature_name} is already running.")
                     any_feature_started = True
 
         if any_feature_started:
@@ -112,7 +110,7 @@ class ClientManager:
             logger.debug("No features were running to stop.")
 
     def apply_feature_state_changes(self, old_config, new_config):
-        """Start or stop features based on configuration changes on the fly."""
+        """Start or stop features on the fly based on configuration checkboxes changes."""
         game_running = Utility.is_game_running()
 
         for key, feature_data in self.features.items():
