@@ -22,12 +22,12 @@ class ConfigManager:
     """
     
     # Application version
-    VERSION = "v1.2.9.3"
+    VERSION = "v1"
     
     # Directory paths
-    UPDATE_DIRECTORY = os.path.expanduser(r'~\AppData\Local\Requests\ItsJesewe\Update')
-    OFFSETS_DIRECTORY = os.path.expanduser(r'~\AppData\Local\Requests\ItsJesewe\Offsets')
-    CONFIG_DIRECTORY = os.path.expanduser(r'~\AppData\Local\Requests\ItsJesewe')
+    UPDATE_DIRECTORY = os.path.expanduser(r'~\AppData\Local\NewProjectName\Update')
+    OFFSETS_DIRECTORY = os.path.expanduser(r'~\AppData\Local\NewProjectName\Offsets')
+    CONFIG_DIRECTORY = os.path.expanduser(r'~\AppData\Local\NewProjectName')
     CONFIG_FILE = Path(CONFIG_DIRECTORY) / 'config.json'
     
     # СИНХРОНИЗИРОВАННАЯ КОНФИГУРАЦИЯ ПО УМОЛЧАНИЮ
