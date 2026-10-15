@@ -73,10 +73,12 @@ def create_timing_settings_section(main_window, parent):
     )
     weapon_dropdown.pack(side="right", padx=(0, 10))
 
+    # ИСПРАВЛЕНИЕ: Описания задержек изменены со "seconds" на миллисекунды "(ms)" 
+    # для точного соответствия целочисленной конфигурации обновленного триггербота.
     settings_list = [
-        ("Min Shot Delay", "entry", "ShotDelayMin", "Minimum delay before shooting (seconds)"),
-        ("Max Shot Delay", "entry", "ShotDelayMax", "Maximum delay before shooting (seconds)"),
-        ("Post Shot Delay", "entry", "PostShotDelay", "Delay after shooting (seconds)")
+        ("Min Shot Delay", "entry", "ShotDelayMin", "Minimum delay before shooting (ms)"),
+        ("Max Shot Delay", "entry", "ShotDelayMax", "Maximum delay before shooting (ms)"),
+        ("Post Shot Delay", "entry", "PostShotDelay", "Delay after shooting (ms)")
     ]
     
     for i, (label, widget_type, key, desc) in enumerate(settings_list):
@@ -85,16 +87,12 @@ def create_timing_settings_section(main_window, parent):
             is_last=(i == len(settings_list) - 1), is_weapon_specific=True
         )
     main_window.update_weapon_settings_display()
-
 def create_setting_item(parent, main_window, label_text, description, widget_type, key, is_last=False, is_weapon_specific=False):
     """Create a standardized setting item."""
     item_frame = ctk.CTkFrame(parent, fg_color="transparent")
     item_frame.pack(fill="x", padx=40, pady=(0, 30 if not is_last else 40))
     
-    container = ctk.CTkFrame(
-        item_frame,
-        **SETTING_ITEM_STYLE
-    )
+    container = ctk.CTkFrame(item_frame, **SETTING_ITEM_STYLE)
     container.pack(fill="x")
     
     content_frame = ctk.CTkFrame(container, fg_color="transparent")
@@ -119,22 +117,16 @@ def create_label_and_description(parent, label_text, description):
     ).pack(fill="x")
 
 def create_widget(parent, main_window, widget_type, key, is_weapon_specific):
-    """Create the input widget for a setting item."""
+    """Create the input widget for a setting item with precise real-time bobs."""
     widget_frame = ctk.CTkFrame(parent, fg_color="transparent")
     widget_frame.pack(side="right", padx=(30, 0))
 
     if widget_type == "entry":
         if key == "TriggerKey":
-            widget = ctk.CTkEntry(
-                widget_frame,
-                justify="center",
-                **ENTRY_STYLE
-            )
+            widget = ctk.CTkEntry(widget_frame, justify="center", **ENTRY_STYLE)
         else:
-            widget = ctk.CTkEntry(
-                widget_frame,
-                **ENTRY_STYLE
-            )
+            widget = ctk.CTkEntry(widget_frame, **ENTRY_STYLE)
+            
         widget.bind("<FocusOut>", lambda e: main_window.save_settings())
         widget.bind("<Return>", lambda e: main_window.save_settings())
         
@@ -162,10 +154,7 @@ def create_widget(parent, main_window, widget_type, key, is_weapon_specific):
 
 def create_section_frame(parent):
     """Create a styled section frame."""
-    section = ctk.CTkFrame(
-        parent,
-        **SECTION_STYLE
-    )
+    section = ctk.CTkFrame(parent, **SECTION_STYLE)
     section.pack(fill="x", pady=(0, 30))
     return section
 
