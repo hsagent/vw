@@ -15,7 +15,7 @@ from watchdog.observers import Observer
 from classes.updater import Updater
 from classes.utility import Utility
 from classes.trigger_bot import CS2TriggerBot
-from classes.overlay import CS2Overlay
+from classes.esp import CS2Overlay
 from classes.bunnyhop import CS2Bunnyhop
 from classes.noflash import CS2NoFlash
 from classes.config_manager import ConfigManager, COLOR_CHOICES
