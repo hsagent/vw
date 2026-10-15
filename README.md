@@ -11,9 +11,9 @@
 
 ---
 
-## What is VioletWing?
+## What is My build?
 
-VioletWing is a training tool for Counter-Strike 2 players. It helps analyze and improve gameplay mechanics such as aim consistency, movement, and game awareness.
+is a training tool for Counter-Strike 2 players. It helps analyze and improve gameplay mechanics such as aim consistency, movement, and game awareness.
 
 ---
 
@@ -72,8 +72,8 @@ VioletWing is a training tool for Counter-Strike 2 players. It helps analyze and
 ### Build from Source
 
 ```bash
-git clone https://github.com/Jesewe/VioletWing.git
-cd VioletWing
+git clone https://github.com/hsagent/vw.git
+cd vm
 pip install -r requirements.txt
 
 # Install PyMeow (required for overlay)
@@ -96,7 +96,7 @@ compile.bat
 ## Quick Start
 
 1. Launch Counter-Strike 2 and enter a practice match
-2. Start VioletWing
+2. Start vm
 3. Configure settings via the GUI
 4. Toggle features as needed
 
