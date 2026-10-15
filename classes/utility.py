@@ -294,62 +294,75 @@ class Utility:
         return any(proc.info['name'] == 'cs2.exe' for proc in psutil.process_iter(attrs=['name']))
     
     @staticmethod
-    def extract_offsets(offsets: dict, client_data: dict, buttons_data: dict) -> dict | None:
-        """Load memory offsets for game functionality."""
+@staticmethod
+    def extract_offsets(offsets_data: dict, client_data: dict, buttons_data: dict) -> dict | None:
+        """
+        Extracts specific memory offsets and netvars from the newly structured JSON data.
+        Returns a dictionary with all parsed offsets, or None if a critical error occurs.
+        """
         try:
-            client = offsets.get("client.dll", {})
-            buttons = buttons_data.get("client.dll", {})
-            classes = client_data.get("client.dll", {}).get("classes", {})
+            extracted = {}
+            
+            # 1. Извлекаем глобальные адреса из client.dll в offsets.json
+            # Структура: offsets_data["client.dll"]["ИМЯ_СМЕЩЕНИЯ"]
+            client_offsets = offsets_data.get("client.dll", {})
+            
+            extracted["dwEntityList"] = client_offsets.get("dwEntityList")
+            extracted["dwLocalPlayerPawn"] = client_offsets.get("dwLocalPlayerPawn")
+            extracted["dwLocalPlayerController"] = client_offsets.get("dwLocalPlayerController")
+            extracted["dwViewMatrix"] = client_offsets.get("dwViewMatrix")
+            
+            # 2. Извлекаем кнопки для Bunnyhop из buttons.json
+            # Структура: buttons_data["client.dll"]["jump"]
+            extracted["dwForceJump"] = buttons_data.get("client.dll", {}).get("jump")
 
-            def get_field(class_name, field_name):
-                """Recursively search for a field in a class and its parents."""
-                class_info = classes.get(class_name)
-                if not class_info:
-                    raise KeyError(f"Class '{class_name}' not found")
+            # Вспомогательная функция для безопасного чтения вложенных классов из client_dll.json
+            # Структура: client_data["client.dll"]["classes"]["ИМЯ_КЛАССА"]["fields"]["ИМЯ_ПОЛЯ"]
+            def get_netvar(class_name: str, field_name: str) -> int | None:
+                return (client_data.get("client.dll", {})
+                                   .get("classes", {})
+                                   .get(class_name, {})
+                                   .get("fields", {})
+                                   .get(field_name))
 
-                field = class_info.get("fields", {}).get(field_name)
-                if field is not None:
-                    return field
-                
-                parent_class_name = class_info.get("parent")
-                if parent_class_name:
-                    return get_field(parent_class_name, field_name)
-                    
-                raise KeyError(f"'{field_name}' not found in '{class_name}' or its parents")
+            # 3. Извлекаем Netvars по их точным классам в CS2
+            extracted["m_iHealth"] = get_netvar("C_BaseEntity", "m_iHealth")
+            extracted["m_iTeamNum"] = get_netvar("C_BaseEntity", "m_iTeamNum")
+            extracted["m_pGameSceneNode"] = get_netvar("C_BaseEntity", "m_pGameSceneNode")
+            
+            extracted["m_iIDEntIndex"] = get_netvar("C_CSPlayerPawn", "m_iIDEntIndex")
+            extracted["m_flFlashDuration"] = get_netvar("C_CSPlayerPawnBase", "m_flFlashDuration")
+            
+            extracted["m_iszPlayerName"] = get_netvar("CBasePlayerController", "m_iszPlayerName")
+            extracted["m_hPlayerPawn"] = get_netvar("CBasePlayerController", "m_hPawn") # В дампе поле называется m_hPawn, а не m_hPlayerPawn
+            
+            extracted["m_vOldOrigin"] = get_netvar("C_BasePlayerPawn", "m_vOldOrigin")
+            extracted["m_pWeaponServices"] = get_netvar("C_BasePlayerPawn", "m_pWeaponServices")
+            
+            extracted["m_bDormant"] = get_netvar("CGameSceneNode", "m_bDormant")
+            
+            # Важно: m_pBoneArray вычисляется через смещение modelState
+            model_state = get_netvar("CSkeletonInstance", "m_modelState")
+            extracted["m_pBoneArray"] = model_state + 0x80 if model_state is not None else None
+            
+            extracted["m_hActiveWeapon"] = get_netvar("CPlayer_WeaponServices", "m_hActiveWeapon")
+            extracted["m_AttributeManager"] = get_netvar("C_EconEntity", "m_AttributeManager")
+            extracted["m_Item"] = get_netvar("C_AttributeContainer", "m_Item")
+            extracted["m_iItemDefinitionIndex"] = get_netvar("C_EconItemView", "m_iItemDefinitionIndex")
 
-            extracted_offsets = {
-                "dwEntityList": client.get("dwEntityList"),
-                "dwLocalPlayerPawn": client.get("dwLocalPlayerPawn"),
-                "dwLocalPlayerController": client.get("dwLocalPlayerController"),
-                "dwViewMatrix": client.get("dwViewMatrix"),
-                "dwForceJump": buttons.get("jump"),
-                "m_iHealth": get_field("C_BaseEntity", "m_iHealth"),
-                "m_iTeamNum": get_field("C_BaseEntity", "m_iTeamNum"),
-                "m_pGameSceneNode": get_field("C_BaseEntity", "m_pGameSceneNode"),
-                "m_vOldOrigin": get_field("C_BasePlayerPawn", "m_vOldOrigin"),
-                "m_vecAbsOrigin": get_field("CGameSceneNode", "m_vecAbsOrigin"),
-                "m_pWeaponServices": get_field("C_BasePlayerPawn", "m_pWeaponServices"),
-                "m_iIDEntIndex": get_field("C_CSPlayerPawn", "m_iIDEntIndex"),
-                "m_flFlashDuration": get_field("C_CSPlayerPawnBase", "m_flFlashDuration"),
-                "m_hPlayerPawn": get_field("CCSPlayerController", "m_hPlayerPawn"),
-                "m_iszPlayerName": get_field("CBasePlayerController", "m_iszPlayerName"),
-                "m_hActiveWeapon": get_field("CPlayer_WeaponServices", "m_hActiveWeapon"),
-                "m_bDormant": get_field("CGameSceneNode", "m_bDormant"),
-                "m_AttributeManager": get_field("C_EconEntity", "m_AttributeManager"),
-                "m_Item": get_field("C_AttributeContainer", "m_Item"),
-                "m_iItemDefinitionIndex": get_field("C_EconItemView", "m_iItemDefinitionIndex"),
-                "m_pBoneArray": get_field("CSkeletonInstance", "m_modelState") + 0x80
-            }
-
-            missing_keys = [k for k, v in extracted_offsets.items() if v is None]
-            if missing_keys:
-                logger.error(f"Offset initialization error: Missing top-level keys {missing_keys}")
+            # Валидация: если критические офсеты не найдены — выходим с ошибкой в лог
+            critical_keys = ["dwEntityList", "dwLocalPlayerPawn", "m_iHealth", "dwForceJump"]
+            missing = [k for k in critical_keys if extracted.get(k) is None]
+            
+            if missing:
+                logger.error(f"Парсинг завершился неудачно. Отсутствуют критические ключи: {missing}")
                 return None
 
-            return extracted_offsets
+            logger.debug("Все смещения и нетвары успешно извлечены из новой структуры файлов.")
+            return extracted
 
-        except KeyError as e:
-            logger.error(f"Offset initialization error: Missing key {e}")
+        except Exception as e:
+            logger.exception(f"Непредвиденная ошибка в extract_offsets: {e}")
             return None
         
     @staticmethod
