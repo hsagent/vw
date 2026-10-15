@@ -1,5 +1,5 @@
 <div align="center">
-   <img src="src/img/icon.png" alt="VioletWing" width="200" height="200">
+   <img src="src/img/icon.png" alt="My Build" width="200" height="200">
    <h1>VioletWing</h1>
    <p>Your ultimate assistant for Counter-Strike 2</p>
 
