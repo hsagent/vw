@@ -36,7 +36,7 @@ def populate_overlay_settings(main_window, frame):
             ],
         },
         "Snaplines": {
-            "icon": "📍",
+            "icon": "🎯",
             "title": "Snaplines Configuration",
             "description": "Settings for snaplines to enemies",
             "settings": [
@@ -85,13 +85,12 @@ def populate_overlay_settings(main_window, frame):
 
 def create_title_section(parent):
     """Create the title and subtitle for the settings page."""
-
     title_frame = ctk.CTkFrame(parent, fg_color="transparent")
     title_frame.pack(fill="x", pady=(0, 40))
     
     ctk.CTkLabel(
         title_frame,
-        text="🌍  Overlay Settings",
+        text="⚙️  Overlay Settings",
         font=FONT_TITLE,
         text_color=COLOR_TEXT_PRIMARY,
         anchor="w",
@@ -104,7 +103,6 @@ def create_title_section(parent):
         text_color=COLOR_TEXT_SECONDARY,
         anchor="w",
     ).pack(side="left", padx=(20, 0), pady=(10, 0))
-
 
 def create_settings_section(main_window, parent, title, description, settings_list):
     """Creates a settings section with a title, description, and a list of settings."""
@@ -140,7 +138,6 @@ def create_settings_section(main_window, parent, title, description, settings_li
             main_window,
             is_last=(i == len(settings_list) - 1),
         )
-
 def create_setting_item(parent, label_text, description, widget_type, key, main_window, is_last=False):
     """Creates a single setting item with a label, description, and the appropriate widget."""
     item_frame = ctk.CTkFrame(parent, fg_color="transparent")
@@ -186,9 +183,7 @@ def create_setting_item(parent, label_text, description, widget_type, key, main_
         widget_info = widget_creators[widget_type](widget_frame, key, main_window)
         main_window.overlay_widgets[key] = widget_info
 
-
 def _create_checkbox(parent, key, main_window):
-    """Creates a checkbox widget and its associated variable."""
     var = ctk.BooleanVar(value=main_window.overlay.config["Overlay"][key])
     widget = ctk.CTkCheckBox(
         parent,
@@ -200,9 +195,7 @@ def _create_checkbox(parent, key, main_window):
     widget.pack()
     return {"widget": widget, "variable": var}
 
-
 def _create_entry(parent, key, main_window):
-    """Creates an entry widget."""
     widget = ctk.CTkEntry(parent, justify="center", **ENTRY_STYLE)
     widget.insert(0, str(main_window.overlay.config["Overlay"][key]))
     widget.bind("<FocusOut>", lambda e: main_window.save_settings(show_message=False))
@@ -210,37 +203,29 @@ def _create_entry(parent, key, main_window):
     widget.pack()
     return {"widget": widget}
 
-
 def _create_slider(parent, key, main_window):
-    """Creates a slider widget with a value display."""
     slider_container = ctk.CTkFrame(parent, fg_color="transparent")
     slider_container.pack()
 
-    value_frame = ctk.CTkFrame(
-        slider_container,
-        corner_radius=8,
-        fg_color=COLOR_BORDER,
-        width=60,
-        height=35,
-    )
+    value_frame = ctk.CTkFrame(slider_container, corner_radius=8, fg_color=COLOR_BORDER, width=60, height=35)
     value_frame.pack(side="right", padx=(15, 0))
     value_frame.pack_propagate(False)
 
     value_label = ctk.CTkLabel(
         value_frame,
-        text=f"{main_window.overlay.config['Overlay'][key]:.0f}"
-        if key == "target_fps"
-        else f"{main_window.overlay.config['Overlay'][key]:.1f}",
+        text=f"{main_window.overlay.config['Overlay'][key]:.0f}" if key == "target_fps" else f"{main_window.overlay.config['Overlay'][key]:.1f}",
         font=ENTRY_STYLE["font"],
         text_color=COLOR_TEXT_PRIMARY,
     )
     value_label.pack(expand=True)
 
+    # ИСПРАВЛЕНИЕ: Для target_fps убрано ограничение number_of_steps, 
+    # чтобы ползунок двигался плавно по всей шкале герцовки (60-420)
     widget = ctk.CTkSlider(
         slider_container,
         from_=0.5 if key == "box_line_thickness" else 60,
         to=5.0 if key == "box_line_thickness" else 420,
-        number_of_steps=9 if key == "box_line_thickness" else 3,
+        number_of_steps=9 if key == "box_line_thickness" else None,
         command=lambda e, k=key: update_slider_value(e, k, main_window),
         **SLIDER_STYLE,
     )
@@ -249,9 +234,7 @@ def _create_slider(parent, key, main_window):
 
     return {"widget": widget, "value_label": value_label}
 
-
 def _create_combobox(parent, key, main_window):
-    """Creates a combobox widget."""
     widget = ctk.CTkComboBox(
         parent,
         values=list(COLOR_CHOICES.keys()),
@@ -266,16 +249,15 @@ def _create_combobox(parent, key, main_window):
     widget.pack()
     return {"widget": widget}
 
-
 def update_slider_value(event, key, main_window):
     """Update the slider value label and save settings."""
     slider_info = main_window.overlay_widgets.get(key, {})
     if "widget" in slider_info and "value_label" in slider_info:
-        value = event
+        # Для target_fps принудительно округляем до целого числа (инпуты FPS не могут быть float)
+        value = int(event) if key == "target_fps" else round(event, 1)
         format_spec = ".0f" if key == "target_fps" else ".1f"
         slider_info["value_label"].configure(text=f"{value:{format_spec}}")
         
-        # Manually update the config for the slider before saving
         if main_window.overlay.config["Overlay"][key] != value:
             main_window.overlay.config["Overlay"][key] = value
             main_window.save_settings(show_message=False)
