@@ -1,6 +1,7 @@
 import pymem
 import pymem.process
 import struct
+from typing import Optional, Dict
 
 from classes.logger import Logger
 from classes.utility import Utility
@@ -14,10 +15,11 @@ class MemoryManager:
         self.offsets = offsets
         self.client_data = client_data
         self.buttons_data = buttons_data
-        self.pm = None
-        self.client_base = None
-        self.ent_list = None  # Cache for entity list pointer
+        self.pm: Optional[pymem.Pymem] = None
+        self.client_base: Optional[int] = None
+        self.ent_list: Optional[int] = None  # Cache for entity list pointer
         self.config = None  # Configuration cache
+        
         # Offset attributes
         self.dwEntityList = None
         self.dwLocalPlayerPawn = None
@@ -45,46 +47,44 @@ class MemoryManager:
         Initialize memory access by attaching to the process and setting up necessary data.
         Returns True if successful, False otherwise.
         """
-        # Check if pymem is initialized and the client module is retrieved
         if not self.initialize_pymem() or not self.get_client_module():
             return False
-        # Cache the entity list pointer
+            
         self.load_offsets()
         if self.dwEntityList is None:  # Ensure offsets were loaded successfully
             return False
-        self.ent_list = self.read_longlong(self.client_base + self.dwEntityList)
-        return True
+            
+        try:
+            self.ent_list = self.read_longlong(self.client_base + self.dwEntityList)
+            return self.ent_list is not None and self.ent_list > 0
+        except Exception as e:
+            logger.error(f"Failed to read entity list root pointer: {e}")
+            return False
 
     def initialize_pymem(self) -> bool:
         """Attach pymem to the game process."""
         try:
-            # Attempt to attach to the cs2.exe process
             self.pm = pymem.Pymem("cs2.exe")
             logger.debug("Successfully attached to cs2.exe process.")
             return True
         except pymem.exception.ProcessNotFound:
-            # Log an error if the process is not found
             logger.error("cs2.exe process not found. Ensure the game is running.")
             return False
         except Exception as e:
-            # Log any other exceptions that may occur
             logger.error(f"Unexpected error while attaching to cs2.exe: {e}")
             return False
 
     def get_client_module(self) -> bool:
         """Retrieve the client.dll module base address."""
         try:
-            # Attempt to retrieve the client.dll module
             client_module = pymem.process.module_from_name(self.pm.process_handle, "client.dll")
             self.client_base = client_module.lpBaseOfDll
             logger.debug("client.dll module found and base address retrieved.")
             return True
         except pymem.exception.ModuleNotFoundError:
-            # Log an error if the module is not found
             logger.error("client.dll not found. Ensure it is loaded.")
             return False
         except Exception as e:
-            # Log any other exceptions that may occur
             logger.error(f"Unexpected error while retrieving client.dll module: {e}")
             return False
 
@@ -115,13 +115,60 @@ class MemoryManager:
         else:
             logger.error("Failed to initialize offsets from extracted data.")
 
-    def get_entity(self, index: int):
-        """Retrieve an entity from the entity list."""
+    # ==========================================
+    # КРИТИЧЕСКИЕ МЕТОДЫ ЧТЕНИЯ И ЗАПИСИ ПАМЯТИ (RPM / WPM)
+    # ==========================================
+    def read_int(self, address: int) -> int:
         try:
-            # Use cached entity list pointer
+            return self.pm.read_int(address)
+        except Exception:
+            return 0
+
+    def read_longlong(self, address: int) -> int:
+        try:
+            return self.pm.read_longlong(address)
+        except Exception:
+            return 0
+
+    def read_vec3(self, address: int) -> Dict[str, float]:
+        try:
+            data = self.pm.read_bytes(address, 12)
+            x, y, z = struct.unpack('fff', data)
+            return {"x": x, "y": y, "z": z}
+        except Exception:
+            return {"x": 0.0, "y": 0.0, "z": 0.0}
+
+    def read_string(self, address: int, max_length: int = 128) -> str:
+        try:
+            # Читаем указатель на строку или саму строку в зависимости от контекста
+            str_ptr = self.read_longlong(address)
+            if not str_ptr:
+                return ""
+            return self.pm.read_string(str_ptr, max_length)
+        except Exception:
+            return ""
+
+    def write_int(self, address: int, value: int) -> bool:
+        try:
+            self.pm.write_int(address, value)
+            return True
+        except Exception:
+            return False
+
+    # ==========================================
+    # ИСПРАВЛЕННАЯ ЛОГИКА СДВИГОВ СУЩНОСТЕЙ
+    # ==========================================
+    def get_entity(self, index: int) -> Optional[int]:
+        """Retrieve an entity from the entity list using Source 2 grid logic."""
+        try:
+            if not self.ent_list:
+                return None
             list_offset = 0x8 * (index >> 9)
             ent_entry = self.read_longlong(self.ent_list + list_offset + 0x10)
-            entity_offset = 112 * (index & 0x1FF)
+            if not ent_entry:
+                return None
+            # Исправление: шаг сетки равен строго 120 байтам
+            entity_offset = 120 * (index & 0x1FF)
             return self.read_longlong(ent_entry + entity_offset)
         except Exception as e:
             logger.debug(f"Error reading entity: {e}")
@@ -131,6 +178,9 @@ class MemoryManager:
         """Retrieve data necessary for firing logic."""
         try:
             player = self.read_longlong(self.client_base + self.dwLocalPlayerPawn)
+            if not player:
+                return None
+                
             entity_id = self.read_int(player + self.m_iIDEntIndex)
 
             if entity_id > 0:
@@ -148,14 +198,11 @@ class MemoryManager:
                     }
             return None
         except Exception as e:
-            if "Could not read memory at" in str(e):
-                logger.error("Game was updated, new offsets are required. Please wait for the offsets update.")
-            else:
-                logger.error(f"Error in fire logic: {e}")
+            logger.error(f"Error in fire logic: {e}")
             return None
 
     def get_weapon_type(self) -> str:
-        """Get the type of the currently equipped weapon."""
+        """Get the type of the currently equipped weapon with fixed index math."""
         try:
             player = self.read_longlong(self.client_base + self.dwLocalPlayerPawn)
             if not player: return "Rifles"
@@ -163,14 +210,15 @@ class MemoryManager:
             weapon_services_ptr = self.read_longlong(player + self.m_pWeaponServices)
             if not weapon_services_ptr: return "Rifles"
 
-            weapon_handle = self.read_longlong(weapon_services_ptr + self.m_hActiveWeapon)
-            if not weapon_handle: return "Rifles"
+            weapon_handle = self.read_int(weapon_services_ptr + self.m_hActiveWeapon)
+            if not weapon_handle or weapon_handle == -1: return "Rifles"
 
             weapon_id = weapon_handle & 0xFFFF
             list_entry = self.read_longlong(self.ent_list + 8 * ((weapon_id & 0x7FFF) >> 9) + 16)
             if not list_entry: return "Rifles"
 
-            weapon_entity_ptr = self.read_longlong(list_entry + 112 * (weapon_id & 0x1FF))
+            # Исправление: здесь шаг сетки также равен 120 байтам
+            weapon_entity_ptr = self.read_longlong(list_entry + 120 * (weapon_id & 0x1FF))
             if not weapon_entity_ptr: return "Rifles"
 
             attribute_manager_ptr = self.read_longlong(weapon_entity_ptr + self.m_AttributeManager)
@@ -181,90 +229,8 @@ class MemoryManager:
 
             item_id = self.read_int(item_ptr + self.m_iItemDefinitionIndex)
 
+            # Таблица маппинга ID предметов под категории конфигурации
             weapon_map = {
-                1: "Pistols", 2: "Pistols", 3: "Pistols", 4: "Pistols", 30: "Pistols", 32: "Pistols", 36: "Pistols", 61: "Pistols", 63: "Pistols", 64: "Pistols",
-                7: "Rifles", 8: "Rifles", 10: "Rifles", 13: "Rifles", 16: "Rifles", 39: "Rifles", 60: "Rifles",
-                9: "Snipers", 11: "Snipers", 38: "Snipers", 40: "Snipers",
-                17: "SMGs", 19: "SMGs", 23: "SMGs", 24: "SMGs", 26: "SMGs", 33: "SMGs", 34: "SMGs",
-                14: "Heavy", 25: "Heavy", 27: "Heavy", 28: "Heavy", 35: "Heavy"
-            }
-            return weapon_map.get(item_id, "Rifles")
-        except Exception as e:
-            # logger.error(f"Error getting weapon type: {e}")
-            return "Rifles"
-        
-    def write_float(self, address: int, value: float) -> None:
-        """Write a float to memory."""
-        try:
-            self.pm.write_float(address, value)
-            logger.debug(f"Wrote float {value} to address {hex(address)}")
-        except Exception as e:
-            logger.error(f"Failed to write float at address {hex(address)}: {e}")
-            raise
-
-    def write_int(self, address: int, value: int) -> None:
-        """Write an integer to memory."""
-        try:
-            self.pm.write_int(address, value)
-            logger.debug(f"Wrote int {value} to address {hex(address)}")
-        except Exception as e:
-            logger.error(f"Failed to write int at address {hex(address)}: {e}")
-            raise
-
-    def read_vec3(self, address: int) -> dict | None:
-        """
-        Reads a 3D vector (three floats) from memory at the specified address.
-        """
-        try:
-            return {
-                "x": self.pm.read_float(address),
-                "y": self.pm.read_float(address + 4),
-                "z": self.pm.read_float(address + 8)
-            }
-        except Exception as e:
-            logger.debug(f"Failed to read vec3 at address {hex(address)}: {e}")
-            return {"x": 0.0, "y": 0.0, "z": 0.0}
-
-    def read_string(self, address: int, max_length: int = 256) -> str:
-        """
-        Reads a null-terminated string from memory at the specified address.
-        """
-        try:
-            data = self.pm.read_bytes(address, max_length)
-            string_data = data.split(b'\x00')[0]
-            return string_data.decode('utf-8', errors='replace')
-        except Exception as e:
-            logger.debug(f"Failed to read string at address {hex(address)}: {e}")
-            return ""
-
-    def read_floats(self, address: int, count: int) -> list[float]:
-        """
-        Reads an array of `count` floats from memory.
-        """
-        try:
-            data = self.pm.read_bytes(address, count * 4)
-            return list(struct.unpack(f'{count}f', data))
-        except Exception as e:
-            logger.debug(f"Failed to read {count} floats at address {hex(address)}: {e}")
-            return []
-
-    def read_int(self, address: int) -> int:
-        """Read an integer from memory."""
-        try:
-            return self.pm.read_int(address)
-        except Exception as e:
-            logger.debug(f"Failed to read int at address {hex(address)}: {e}")
-            return 0
-
-    def read_longlong(self, address: int) -> int:
-        """Read a long long from memory."""
-        try:
-            return self.pm.read_longlong(address)
-        except Exception as e:
-            logger.debug(f"Failed to read longlong at address {hex(address)}: {e}")
-            return 0
-
-    @property
-    def client_dll_base(self) -> int:
-        """Get the base address of client.dll."""
-        return self.client_base
+                1: "Pistols", 2: "Pistols", 3: "Pistols", 4: "Pistols", 30: "Pistols", 
+                32: "Pistols", 36: "Pistols", 61: "Pistols", 63: "Pistols",
+                7: "Snipers", 8: "Snipers", 40: "Snipers", 38: "Snipers",
