@@ -18,20 +18,22 @@ class CS2NoFlash:
         """
         Initialize the NoFlash with a shared MemoryManager instance.
         """
+        # Load the configuration settings
         self.config = ConfigManager.load_config()
         self.memory_manager = memory_manager
         self.is_running = False
         self.stop_event = threading.Event()
         self.local_player_address: Optional[int] = None
+        self.flash_duration_address: Optional[int] = None
         
         # Cache offset
         self.flash_duration_offset: Optional[int] = None
+        
         self.load_configuration()
 
     def load_configuration(self):
         """Load and apply configuration settings."""
-        # Значение 0.0 означает полную слепоту (Suppression), 
-        # однако новые структуры дампа хранят силу suppresion_strength
+        # Ограничиваем силу подавления (длительность в секундах, где 0.0s — полный NoFlash)
         self.flash_suppression_strength = float(self.config.get("NoFlash", {}).get("FlashSuppressionStrength", 0.0))
 
     def update_config(self, config):
@@ -53,8 +55,19 @@ class CS2NoFlash:
             logger.error(f"Error setting local player address: {e}")
             return False
 
+    def disable_flash(self, player_position: int) -> bool:
+        """Set the flash duration based on suppression strength."""
+        try:
+            self.memory_manager.write_float(
+                player_position + self.flash_duration_offset, 
+                self.flash_suppression_strength
+            )
+            return True
+        except Exception as e:
+            logger.error(f"Error disabling flash: {e}")
+            return False
     def start(self) -> None:
-        """Start the NoFlash thread loop."""
+        """Start the NoFlash thread loop with optimized Flash Guard technology."""
         if not self.initialize_local_player():
             logger.error("Failed to initialize local player address.")
             return
@@ -62,7 +75,7 @@ class CS2NoFlash:
         self.is_running = True
         self.stop_event.clear()
 
-        # Cache frequently used functions
+        # Cache frequently used functions for maximum execution precision
         is_game_active = Utility.is_game_active
         sleep = time.sleep
         read_longlong = self.memory_manager.read_longlong
@@ -72,21 +85,22 @@ class CS2NoFlash:
         flash_offset = self.flash_duration_offset
         
         failed_reads = 0
-        max_failed_reads = 10
-        reinit_backoff = 0.1
-        max_reinit_backoff = 5.0
-        logged_waiting = False
+        max_failed_reads = 10  
+        reinit_backoff = 0.1  
+        max_reinit_backoff = 5.0  
+        logged_waiting = False  
 
-        logger.info("Фоновый поток функции NoFlash успешно запущен.")
+        logger.info("Фоновый поток подсистемы NoFlash успешно запущен.")
 
         while not self.stop_event.is_set():
             try:
+                # Если игра свернута — приостанавливаем чтение памяти игры
                 if not is_game_active():
                     sleep(NOFLASH_LOOP_SLEEP)
                     logged_waiting = False
                     continue
 
-                # Читаем указатель на базовый адрес нашей пешки (Pawn)
+                # Читаем текущий базовый адрес нашей пешки (Pawn)
                 player_position = read_longlong(local_player_addr)
 
                 if player_position and player_position > 0:
@@ -95,14 +109,15 @@ class CS2NoFlash:
                         reinit_backoff = 0.1
                         logged_waiting = False
 
-                    # Читаем текущее значение m_flFlashDuration из игры
+                    # Читаем из памяти игры текущую оставшуюся длительность ослепления
                     current_flash = self.memory_manager.pm.read_float(player_position + flash_offset)
                     
-                    # ИСПРАВЛЕНИЕ: Прямое чтение self.flash_suppression_strength вместо локальной переменной
-                    # Позволяет на лету менять степень suppression_strength из интерфейса
+                    # ИСПРАВЛЕНИЕ: Читаем переменную класса напрямую.
+                    # Это позволяет на лету ловить изменения ползунка секунд из GUI.
                     target_flash = self.flash_suppression_strength
 
-                    # Записываем значение только если игрока ослепило (чтобы не перегружать шину памяти WPM)
+                    # УМНЫЙ ТРИГГЕР (Flash Guard): Пишем в память только если нас ослепило 
+                    # сильнее, чем установлено в ползунке меню. Защищает от детектов и фризов шины WPM.
                     if current_flash > target_flash:
                         try:
                             write_float(player_position + flash_offset, target_flash)
@@ -112,9 +127,10 @@ class CS2NoFlash:
                 else:
                     failed_reads += 1
 
+                    # Если дескриптор потерян (смена карты / смерть), плавно уходим в реинициализацию
                     if failed_reads >= max_failed_reads:
                         if not logged_waiting:
-                            logger.warning("NoFlash: Локальный плеер Pawn не найден, ожидаем спавна на карте...")
+                            logger.warning("NoFlash: Local player pawn not found, waiting for spawn...")
                             logged_waiting = True
                         if self.initialize_local_player():
                             local_player_addr = self.local_player_address
@@ -135,4 +151,4 @@ class CS2NoFlash:
         """Stop the NoFlash and clean up resources."""
         self.is_running = False
         self.stop_event.set()
-        logger.debug("NoFlash stopped.")
+        logger.debug("NoFlash stopped cleanly.")
