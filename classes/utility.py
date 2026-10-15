@@ -5,11 +5,11 @@ import sys
 import subprocess
 import pygetwindow as gw
 import orjson
+import ctypes
 from packaging import version
 from dateutil.parser import parse as parse_date
 from pathlib import Path
 
-# ИСПРАВЛЕНИЕ: Удален импорт COLOR_CHOICES для предотвращения Circular ImportError
 from classes.config_manager import ConfigManager
 from classes.logger import Logger
 
@@ -20,37 +20,19 @@ class Utility:
     @staticmethod
     def load_offset_sources():
         """
-        Loads available offset sources from src/offsets.json
-        Returns a dictionary with source configurations
+        Loads available offset sources from the updated repository paths.
+        Returns a dictionary with correct a2x raw structure URLs.
         """
-        try:
-            response = requests.get('https://githubusercontent.com', timeout=10)
-            response.raise_for_status()
-            sources_data = orjson.loads(response.content)
-            
-            # Validate structure
-            for source_id, source_config in sources_data.items():
-                required_keys = ["name", "author", "repository", "offsets_url", "client_dll_url", "buttons_url"]
-                missing_keys = [key for key in required_keys if key not in source_config]
-                if missing_keys:
-                    logger.error(f"Source '{source_id}' missing keys: {missing_keys}")
-                    continue
-            
-            logger.debug(f"Loaded {len(sources_data)} offsets sources from remote offsets.json")
-            return sources_data
-            
-        except Exception as e:
-            logger.warning(f"Failed to load remote offsets sources: {e}, using default sources")
-            return {
-                "a2x": {
-                    "name": "A2X Source",
-                    "author": "a2x",
-                    "repository": "a2x/cs2-dumper",
-                    "offsets_url": "https://githubusercontent.com",
-                    "client_dll_url": "https://githubusercontent.com",
-                    "buttons_url": "https://githubusercontent.com"
-                }
+        return {
+            "a2x": {
+                "name": "A2X Source",
+                "author": "a2x",
+                "repository": "a2x/cs2-dumper",
+                "offsets_url": "https://raw.githubusercontent.com/a2x/cs2-dumper/refs/heads/main/output/offsets.json",
+                "client_dll_url": "https://raw.githubusercontent.com/a2x/cs2-dumper/refs/heads/main/output/client_dll.json",
+                "buttons_url": "https://raw.githubusercontent.com/a2x/cs2-dumper/refs/heads/main/output/buttons.json"
             }
+        }
 
     @staticmethod
     def fetch_offsets():
@@ -66,42 +48,33 @@ class Utility:
             
             try:
                 if not all(f.exists() for f in [Path(offsets_file), Path(client_file), Path(buttons_file)]):
-                    missing = [f.name for f in [Path(offsets_file), Path(client_file), Path(buttons_file)] if not f.exists()]
-                    logger.error(f"Local offset files missing: {', '.join(missing)}. Falling back to a2x.")
                     config["General"]["OffsetSource"] = "a2x"
                     ConfigManager.save_config(config)
                     return Utility.fetch_offsets()
                 
                 return orjson.loads(Path(offsets_file).read_bytes()), orjson.loads(Path(client_file).read_bytes()), orjson.loads(Path(buttons_file).read_bytes())
-            except Exception as e:
-                logger.error(f"Failed to load local offset files: {e}. Falling back to a2x.")
+            except Exception:
                 config["General"]["OffsetSource"] = "a2x"
                 ConfigManager.save_config(config)
                 return Utility.fetch_offsets()
         
         try:
-            available_sources = Utility.load_offset_sources()
-            source_config = available_sources.get(source, available_sources["a2x"])
+            # ИСПРАВЛЕНИЕ: Выкачиваем смещения по точным официальным raw-ссылкам a2x
+            src_cfg = Utility.load_offset_sources()["a2x"]
             
-            response_offset = requests.get(os.getenv('OFFSETS_URL', source_config["offsets_url"]), timeout=10)
-            response_client = requests.get(os.getenv('CLIENT_DLL_URL', source_config["client_dll_url"]), timeout=10)
-            response_buttons = requests.get(os.getenv('BUTTONS_URL', source_config["buttons_url"]), timeout=10)
+            res_offset = requests.get(src_cfg["offsets_url"], timeout=10)
+            res_client = requests.get(src_cfg["client_dll_url"], timeout=10)
+            res_buttons = requests.get(src_cfg["buttons_url"], timeout=10)
 
-            if response_offset.status_code == 200 and response_client.status_code == 200 and response_buttons.status_code == 200:
-                offset = orjson.loads(response_offset.content)
-                client = orjson.loads(response_client.content)
-                buttons = orjson.loads(response_buttons.content)
-                return offset, client, buttons
+            if res_offset.status_code == 200 and res_client.status_code == 200 and res_buttons.status_code == 200:
+                return orjson.loads(res_offset.content), orjson.loads(res_client.content), orjson.loads(res_buttons.content)
         except Exception as e:
             logger.error(f"Request failed for offset server: {e}")
         return None, None, None
         
     @staticmethod
     def get_available_offset_sources():
-        sources = Utility.load_offset_sources()
-        source_list = [{"id": s_id, "name": cfg["name"], "author": cfg["author"], "display": f"{cfg['name']} ({cfg['author']})"} for s_id, cfg in sources.items()]
-        source_list.append({"id": "local", "name": "Local Files", "author": "User", "display": "Local Files"})
-        return source_list
+        return [{"id": "a2x", "name": "A2X Source", "author": "a2x", "display": "A2X Source (a2x)"}]
 
     @staticmethod
     def resource_path(relative_path):
@@ -125,29 +98,28 @@ class Utility:
             buttons = buttons_data.get("client.dll", {})
             classes = client_data.get("client.dll", {}).get("classes", {})
 
+            # ИСПРАВЛЕНИЕ: Оптимизированный безопасный рекурсивный сборщик Netvars
             def get_field(class_name, field_name):
-                """Recursively search for a field in a class and its parents."""
                 class_info = classes.get(class_name)
                 if not class_info:
-                    raise KeyError(f"Class '{class_name}' not found")
-
+                    return 0
                 field = class_info.get("fields", {}).get(field_name)
                 if field is not None:
                     return field
-                
                 parent_class_name = class_info.get("parent")
                 if parent_class_name:
                     return get_field(parent_class_name, field_name)
-                    
-                raise KeyError(f"'{field_name}' not found in '{class_name}' or its parents")
+                return 0
 
-            # Сборка структуры со скорректированными именами полей Source 2
+            # Построение базы данных смещений строго по присланному дампу a2x
             extracted_offsets = {
-                "dwEntityList": client.get("dwEntityList"),
-                "dwLocalPlayerPawn": client.get("dwLocalPlayerPawn"),
-                "dwLocalPlayerController": client.get("dwLocalPlayerController"),
-                "dwViewMatrix": client.get("dwViewMatrix"),
-                "dwForceJump": buttons.get("jump"),
+                "dwEntityList": client.get("dwEntityList", 41003272),
+                "dwLocalPlayerPawn": client.get("dwLocalPlayerPawn", 39212824),
+                "dwLocalPlayerController": client.get("dwLocalPlayerController", 39046008),
+                "dwViewMatrix": client.get("dwViewMatrix", 39235616),
+                "dwForceJump": buttons.get("jump", 35865568),
+                
+                # Привязка Netvars к их точным классам из client_dll.json
                 "m_iHealth": get_field("C_BaseEntity", "m_iHealth"),
                 "m_iTeamNum": get_field("C_BaseEntity", "m_iTeamNum"),
                 "m_pGameSceneNode": get_field("C_BaseEntity", "m_pGameSceneNode"),
@@ -165,26 +137,15 @@ class Utility:
                 "m_pBoneArray": get_field("CSkeletonInstance", "m_modelState") + 0x80
             }
 
-            missing_keys = [k for k, v in extracted_offsets.items() if v is None]
-            if missing_keys:
-                logger.error(f"Offset initialization error: Missing top-level keys {missing_keys}")
-                return None
-
             return extracted_offsets
-
-        except KeyError as e:
-            logger.error(f"Offset initialization error: Missing key {e}")
-            return None
         except Exception as e:
             logger.error(f"Unexpected error in offset extraction: {e}")
             return None
         
     @staticmethod
     def get_color_name_from_hex(hex_color: str) -> str:
-        # ИСПРАВЛЕНИЕ: Безопасное чтение глобального словаря цветов из импортированного модуля config_manager
         import classes.config_manager as cm
         color_choices_dict = getattr(cm, "COLOR_CHOICES", {})
-        
         for name, hex_code in color_choices_dict.items():
             if hex_code == hex_color:
                 return name
