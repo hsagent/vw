@@ -20,8 +20,8 @@ class ConfigFileChangeHandler(FileSystemEventHandler):
 
         Args:
             main_window: Instance of MainWindow managing all features.
-            debounce_interval: Time in seconds to debounce file change events. 
-                               (0.3s оптимально, 1.0s — слишком долгая задержка для чита)
+            debounce_interval: Time in seconds to debounce file change events.
+                               (ИСПРАВЛЕНИЕ: 0.3с оптимально, 1.0s — слишком долгий отклик для чита)
         """
         self.main_window = main_window
         self.debounce_interval = debounce_interval
@@ -37,35 +37,36 @@ class ConfigFileChangeHandler(FileSystemEventHandler):
                 self.debounce_timer = threading.Timer(self.debounce_interval, self.reload_config)
                 self.debounce_timer.start()
         except Exception:
-            # Предотвращаем краш watchdog, если файл был временно заблокирован ОС
+            # Защита от краша watchdog, если Windows на наносекунду заблокировала файл
             pass
 
     def reload_config(self):
         """Reloads the configuration file and updates all feature configurations safely."""
         try:
-            logger.debug("Файл config.json изменен на диске. Начинаем перезагрузку параметров...")
+            logger.debug("Наблюдатель зафиксировал изменение config.json на диске. Перечитываем...")
             
-            # Безопасно загружаем обновленную конфигурацию (защищено Lock-блокировщиком внутри ConfigManager)
+            # Перезагружаем конфигурацию (защищено потоковым Lock внутри ConfigManager)
             new_config = ConfigManager.load_config()
             
-            # ИСПРАВЛЕНИЕ: Передаем обновление через ClientManager, который вызовет метод .update_config() 
-            # у каждого активного потока. Это заставит чит мгновенно применить новые задержки, кнопки и флаги.
+            # ИСПРАВЛЕНИЕ: Вместо пассивной подмены словарей вызываем сквозное 
+            # обновление через ClientManager. Это мгновенно применит новые задержки/кнопки во всех потоках!
             if hasattr(self.main_window, 'client_manager'):
                 self.main_window.client_manager.update_running_feature_configs(new_config)
             else:
-                # Резервный вариант, если client_manager еще не привязан к MainWindow
+                # Резервный откат на случай, если вызов произошел до привязки ClientManager
                 if hasattr(self.main_window, 'triggerbot') and hasattr(self.main_window.triggerbot, 'update_config'):
                     self.main_window.triggerbot.update_config(new_config)
                 if hasattr(self.main_window, 'overlay') and hasattr(self.main_window.overlay, 'update_config'):
                     self.main_window.overlay.update_config(new_config)
                 if hasattr(self.main_window, 'bunnyhop') and hasattr(self.main_window.bunnyhop, 'update_config'):
                     self.main_window.bunnyhop.update_config(new_config)
+                if hasattr(self.main_window, 'noflash') and hasattr(self.main_window.noflash, 'update_config'):
+                    self.main_window.noflash.update_config(new_config)
             
-            # Синхронизируем состояние самого графического интерфейса (Tkinter UI) в основном потоке
+            # Асинхронно синхронизируем визуальное состояние элементов Tkinter GUI в основном потоке
             if hasattr(self.main_window, 'root') and hasattr(self.main_window, 'update_ui_from_config'):
                 self.main_window.root.after(0, self.main_window.update_ui_from_config)
                 
-            logger.info("Конфигурация успешно обновлена во всех активных потоках функций чита.")
-            
+            logger.info("Все конфигурации фоновых потоков и GUI успешно обновлены «на лету».")
         except Exception as e:
             logger.exception("Failed to reload configuration from %s: %s", self.config_path, e)
