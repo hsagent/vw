@@ -1,6 +1,6 @@
 <div align="center">
    <img src="src/img/icon.png" alt="My Build" width="200" height="200">
-   <h1>VioletWing</h1>
+   <h1>NewProjectName</h1>
    <p>Your ultimate assistant for Counter-Strike 2</p>
 
 [![Downloads](https://img.shields.io/github/downloads/hsagent/vw/total?style=for-the-badge&logo=github&color=8E44AD)](https://github.com/hsagent/vw/releases)
