@@ -7,100 +7,90 @@ from classes.memory_manager import MemoryManager
 from classes.logger import Logger
 from classes.utility import Utility
 
-# Initialize the logger for consistent logging
+# Инициализация логгера
 logger = Logger.get_logger(__name__)
-# Define the main loop sleep time for NoFlash
+
+# Сон основного цикла NoFlash
 NOFLASH_LOOP_SLEEP = 0.01
 
 class CS2NoFlash:
-    """Manages the NoFlash functionality for Counter-Strike 2."""
+    """Управляет функционалом легитимного NoFlash для Counter-Strike 2."""
     def __init__(self, memory_manager: MemoryManager) -> None:
         """
-        Initialize the NoFlash with a shared MemoryManager instance.
+        Инициализация NoFlash с общим экземпляром MemoryManager.
         """
-        # Load the configuration settings
         self.config = ConfigManager.load_config()
         self.memory_manager = memory_manager
         self.is_running = False
         self.stop_event = threading.Event()
-        self.local_player_address: Optional[int] = None
-        self.flash_duration_address: Optional[int] = None
         
-        # Cache offset
+        self.local_player_address: Optional[int] = None
         self.flash_duration_offset: Optional[int] = None
+        self.flash_max_alpha_offset: Optional[int] = None # ДОБАВЛЕНО для CS2
         
         self.load_configuration()
 
     def load_configuration(self):
-        """Load and apply configuration settings."""
-        # Ограничиваем силу подавления (длительность в секундах, где 0.0s — полный NoFlash)
-        self.flash_suppression_strength = float(self.config.get("NoFlash", {}).get("FlashSuppressionStrength", 0.0))
+        """Загружает и применяет настройки силы NoFlash."""
+        # Значение от 0.0 (дефолтная слепота) до 255.0 (экран полностью чистый)
+        # Безопаснее всего ставить частичное скрытие (например, 100.0)
+        self.flash_suppression_strength = float(self.config.get("NoFlash", {}).get("FlashSuppressionStrength", 255.0))
 
     def update_config(self, config):
-        """Update the configuration settings."""
+        """Обновляет конфигурацию на лету прямо во время работы потока."""
         self.config = config
         self.load_configuration()
-        logger.debug("NoFlash configuration updated.")
+        logger.debug("Конфигурация NoFlash успешно обновлена.")
 
     def initialize_local_player(self) -> bool:
-        """Initialize the local player address."""
+        """Инициализирует адреса локального игрока и смещения флеша."""
         if self.memory_manager.dwLocalPlayerPawn is None or self.memory_manager.m_flFlashDuration is None:
-            logger.error("dwLocalPlayerPawn or m_flFlashDuration offset not initialized.")
+            logger.error("Оффсеты dwLocalPlayerPawn или m_flFlashDuration не найдены в MemoryManager.")
             return False
         try:
             self.local_player_address = self.memory_manager.client_base + self.memory_manager.dwLocalPlayerPawn
             self.flash_duration_offset = self.memory_manager.m_flFlashDuration
+            
+            # В CS2 оффсет MaxAlpha обычно находится ровно перед или после FlashDuration (-4 байта)
+            self.flash_max_alpha_offset = self.flash_duration_offset - 4
             return True
         except Exception as e:
-            logger.error(f"Error setting local player address: {e}")
-            return False
-
-    def disable_flash(self, player_position: int) -> bool:
-        """Set the flash duration based on suppression strength."""
-        try:
-            self.memory_manager.write_float(
-                player_position + self.flash_duration_offset, 
-                self.flash_suppression_strength
-            )
-            return True
-        except Exception as e:
-            logger.error(f"Error disabling flash: {e}")
+            logger.error(f"Ошибка при инициализации адресов NoFlash: {e}")
             return False
     def start(self) -> None:
-        """Start the NoFlash thread loop with optimized Flash Guard technology."""
+        """Запускает бесконечный поток NoFlash."""
         if not self.initialize_local_player():
-            logger.error("Failed to initialize local player address.")
+            logger.error("Не удалось настроить локальные адреса для NoFlash.")
+            self.is_running = False
             return
 
         self.is_running = True
         self.stop_event.clear()
 
-        # Cache frequently used functions for maximum execution precision
         is_game_active = Utility.is_game_active
         sleep = time.sleep
         read_longlong = self.memory_manager.read_longlong
-        write_float = self.memory_manager.write_float
+        read_float = self.memory_manager.pm.read_float if hasattr(self.memory_manager, 'pm') else None
         
         local_player_addr = self.local_player_address
-        flash_offset = self.flash_duration_offset
+        dur_offset = self.flash_duration_offset
+        alpha_offset = self.flash_max_alpha_offset
         
         failed_reads = 0
-        max_failed_reads = 10  
-        reinit_backoff = 0.1  
-        max_reinit_backoff = 5.0  
-        logged_waiting = False  
+        max_failed_reads = 10
+        reinit_backoff = 0.1
+        logged_waiting = False
 
-        logger.info("Фоновый поток подсистемы NoFlash успешно запущен.")
+        logger.info("Модуль NoFlash успешно запущен.")
 
         while not self.stop_event.is_set():
             try:
-                # Если игра свернута — приостанавливаем чтение памяти игры
                 if not is_game_active():
-                    sleep(NOFLASH_LOOP_SLEEP)
+                    sleep(0.1)
                     logged_waiting = False
                     continue
 
-                # Читаем текущий базовый адрес нашей пешки (Pawn)
+                # Читаем указатель на LocalPlayerPawn
                 player_position = read_longlong(local_player_addr)
 
                 if player_position and player_position > 0:
@@ -109,46 +99,47 @@ class CS2NoFlash:
                         reinit_backoff = 0.1
                         logged_waiting = False
 
-                    # Читаем из памяти игры текущую оставшуюся длительность ослепления
-                    current_flash = self.memory_manager.pm.read_float(player_position + flash_offset)
-                    
-                    # ИСПРАВЛЕНИЕ: Читаем переменную класса напрямую.
-                    # Это позволяет на лету ловить изменения ползунка секунд из GUI.
-                    target_flash = self.flash_suppression_strength
+                    # ИСПРАВЛЕНО: Берем актуальное значение силы подавления из конфига на каждом тике
+                    target_alpha = self.flash_suppression_strength
 
-                    # УМНЫЙ ТРИГГЕР (Flash Guard): Пишем в память только если нас ослепило 
-                    # сильнее, чем установлено в ползунке меню. Защищает от детектов и фризов шины WPM.
-                    if current_flash > target_flash:
-                        try:
-                            write_float(player_position + flash_offset, target_flash)
-                        except Exception as e:
-                            logger.debug(f"Error writing flash duration: {e}")
-                            failed_reads += 1
+                    # Читаем текущую длительность ослепления игрока
+                    try:
+                        current_duration = self.memory_manager.pm.read_float(player_position + dur_offset)
+                        
+                        # Если игрок ослеплен (длительность > 0)
+                        if current_duration > 0.0:
+                            # Изменяем альфу (прозрачность флеша) на легитимное значение
+                            # Вместо записи 0 в duration (что палится античитом), мы снижаем интенсивность белого экрана
+                            self.memory_manager.write_float(player_position + alpha_offset, target_alpha)
+                            
+                    except Exception:
+                        failed_reads += 1
                 else:
                     failed_reads += 1
 
-                    # Если дескриптор потерян (смена карты / смерть), плавно уходим в реинициализацию
+                    # Если игрок умер или раунд перезапустился — выполняем мягкую переинициализацию
                     if failed_reads >= max_failed_reads:
                         if not logged_waiting:
-                            logger.warning("NoFlash: Local player pawn not found, waiting for spawn...")
+                            logger.warning("Ожидание спавна локального игрока для NoFlash...")
                             logged_waiting = True
                         if self.initialize_local_player():
                             local_player_addr = self.local_player_address
-                            flash_offset = self.flash_duration_offset
+                            dur_offset = self.flash_duration_offset
+                            alpha_offset = self.flash_max_alpha_offset
                         failed_reads = 0
                         sleep(reinit_backoff)
-                        reinit_backoff = min(reinit_backoff * 2, max_reinit_backoff)
+                        reinit_backoff = min(reinit_backoff * 2, 2.0)
                         continue
 
                 sleep(NOFLASH_LOOP_SLEEP)
 
             except Exception as e:
-                logger.error(f"Unexpected error in NoFlash loop: {e}", exc_info=True)
+                logger.error(f"Непредвиденная ошибка в цикле NoFlash: {e}")
                 failed_reads += 1
                 sleep(NOFLASH_LOOP_SLEEP)
 
     def stop(self) -> None:
-        """Stop the NoFlash and clean up resources."""
+        """Останавливает работу модуля NoFlash."""
         self.is_running = False
         self.stop_event.set()
-        logger.debug("NoFlash stopped cleanly.")
+        logger.debug("NoFlash успешно остановлен.")

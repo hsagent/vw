@@ -1,6 +1,6 @@
 <div align="center">
-   <img src="src/img/icon.png" alt="My Build" width="200" height="200">
-   <h1>NewProjectName</h1>
+   <img src="src/img/icon.png" alt="My Project" width="200" height="200">
+   <h1>My Project</h1>
    <p>Your ultimate assistant for Counter-Strike 2</p>
 
 [![Downloads](https://img.shields.io/github/downloads/hsagent/vw/total?style=for-the-badge&logo=github&color=8E44AD)](https://github.com/hsagent/vw/releases)
@@ -11,9 +11,9 @@
 
 ---
 
-## What is My build?
+## What is My Project?
 
-is a training tool for Counter-Strike 2 players. It helps analyze and improve gameplay mechanics such as aim consistency, movement, and game awareness.
+My Project is a training tool for Counter-Strike 2 players. It helps analyze and improve gameplay mechanics such as aim consistency, movement, and game awareness.
 
 ---
 
@@ -56,7 +56,7 @@ is a training tool for Counter-Strike 2 players. It helps analyze and improve ga
 
 - Automatic offset updates fetched on startup
 - Live config reload from `config.json` without restart
-- Logs saved to `%LOCALAPPDATA%\NewProjectName\logs\`
+- Logs saved to `%LOCALAPPDATA%\My Project\logs\`
 - Stable and pre-release version support
 
 ---
@@ -66,14 +66,14 @@ is a training tool for Counter-Strike 2 players. It helps analyze and improve ga
 ### Pre-Built (Recommended)
 
 1. Go to the [Releases Page](https://github.com/hsagent/vw/releases)
-2. Download the latest `NewProjectName.exe`
+2. Download the latest `MyProject.exe`
 3. Run it
 
 ### Build from Source
 
 ```bash
 git clone https://github.com/hsagent/vw.git
-cd vm
+cd vw
 pip install -r requirements.txt
 
 # Install PyMeow (required for overlay)
@@ -96,7 +96,7 @@ compile.bat
 ## Quick Start
 
 1. Launch Counter-Strike 2 and enter a practice match
-2. Start vm
+2. Start My Project
 3. Configure settings via the GUI
 4. Toggle features as needed
 
@@ -124,7 +124,7 @@ Settings can be changed through the GUI or by editing `config.json` directly. Ch
 | Bunnyhop inconsistent           | Ensure CS2 window has focus; verify jump key settings                         |
 | NoFlash not working             | Confirm offsets are current and feature is enabled                            |
 
-For additional help, check the FAQ tab in the application or review logs at `%LOCALAPPDATA%\NewProjectName\logs\`.
+For additional help, check the FAQ tab in the application or review logs at `%LOCALAPPDATA%\My Project\logs\`.
 
 ---
 
@@ -136,4 +136,4 @@ This tool is provided for educational and training purposes only. Using automati
 
 ## License
 
-VioletWing is licensed under the **GNU General Public License v3.0**. See the [LICENSE](LICENSE) file for details.
+My Project is licensed under the **GNU General Public License v3.0**. See the [LICENSE](LICENSE) file for details.

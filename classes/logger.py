@@ -8,40 +8,48 @@ import threading
 
 @dataclass
 class LoggerConfig:
-    """Configuration for the Logger class."""
-    log_directory: str = os.path.expanduser(r'~\AppData\Local\NewProjectName\logs')
+    """Конфигурация для системы логирования My Project."""
+    log_directory: str = os.path.expanduser(r'~\AppData\Local\My Project\logs')
     max_bytes: int = 5 * 1024 * 1024  # 5MB
-    backup_count: int = 5
-    clear_on_startup: bool = False     # ИСПРАВЛЕНИЕ: Переводим в False, чтобы не затирать логи крашей прошлых сессий игры!
+    backup_count: int = 3             # Уменьшено до 3 для экономии места
+    clear_on_startup: bool = True
     console_level: int = logging.INFO
     file_level: int = logging.INFO
     detailed_level: int = logging.DEBUG
     suppress_patterns: List[str] = None
     
     def __post_init__(self):
-        """Initialize default suppress patterns if none provided."""
+        """Инициализирует паттерны фильтрации мусора памяти CS2, чтобы не проседал FPS."""
         if self.suppress_patterns is None:
             self.suppress_patterns = [
-                "Error drawing entity: 'NoneType' object is not subscriptable",
-                "Could not read memory at"  # Подавляем спам при сворачивании игры
+                "Could not read memory at",          # Пропуски чтения при перезапуске раунда
+                "Failed to read int at address",     # Ошибки пустых указателей (смена карты)
+                "Failed to read longlong",           # Штатные промахи EntityList
+                "Error drawing entity",              # Ошибки отрисовки мертвых игроков
+                "is not subscriptable",              # Старые ошибки разбора
+                # Русскоязычные аналоги — иначе спам от циклов функций
+                "Ошибка отрисовки сущности",
+                "Ошибка в основном цикле оверлея pyMeow",
+                "Ошибка в цикле TriggerBot",
+                "Ошибка в цикле Bunnyhop",
+                "Ошибка в цикле NoFlash",
+                "Непредвиденная ошибка в цикле NoFlash",
             ]
 
 class SuppressErrorFilter(logging.Filter):
-    """A logging filter to suppress messages containing specific patterns."""
+    """Фильтр для предотвращения записи цикличных ошибок чтения памяти в логи."""
     def __init__(self, patterns: List[str]):
         super().__init__()
         self.patterns = patterns or []
     
     def filter(self, record: logging.LogRecord) -> bool:
         message = record.getMessage()
+        # Если сообщение содержит хоть один мусорный паттерн — блокируем его запись
         return not any(pattern in message for pattern in self.patterns)
-
 class Logger:
-    """
-    A thread-safe singleton logger for the application.
-    Features standard, detailed (debug) logging and active thread tracking.
-    """
+    """Потокобезопасный синглтон-логгер для внешнего софта CS2."""
     _config: Optional[LoggerConfig] = None
+    _logger: Optional[logging.Logger] = None
     _logger_configured: bool = False
     _lock: threading.Lock = threading.Lock()
     
@@ -52,12 +60,12 @@ class Logger:
     @classmethod
     def LOG_FILE(cls) -> str:
         log_dir = cls._config.log_directory if cls._config else LoggerConfig().log_directory
-        return os.path.join(log_dir, 'violetwing.log')
+        return os.path.join(log_dir, 'myproject.log')
     
     @classmethod
     def DETAILED_LOG_FILE(cls) -> str:
         log_dir = cls._config.log_directory if cls._config else LoggerConfig().log_directory
-        return os.path.join(log_dir, 'NewProjectName_detailed.log')
+        return os.path.join(log_dir, 'myproject_detailed.log')
     
     @staticmethod
     def _clear_existing_logs(log_files: List[str], backup_count: int) -> None:
@@ -71,7 +79,9 @@ class Logger:
                         if os.path.exists(backup_file):
                             os.remove(backup_file)
             except (OSError, PermissionError) as e:
-                print(f"Warning: Could not clear log file {log_file}: {e}", file=sys.stderr)
+                print(f"Warning: Не удалось очистить лог {log_file}: {e}", file=sys.stderr)
+            except Exception as e:
+                print(f"Unexpected error: {e}", file=sys.stderr)
     
     @staticmethod
     def _create_log_directory(directory: str) -> bool:
@@ -79,35 +89,23 @@ class Logger:
             os.makedirs(directory, exist_ok=True)
             return True
         except Exception as e:
-            print(f"Error: Could not create log directory {directory}: {e}", file=sys.stderr)
+            print(f"Error: Ошибка создания папки логов {directory}: {e}", file=sys.stderr)
             return False
     
     @staticmethod
-    def _create_file_handler(
-        log_file: str,
-        level: int,
-        formatter: logging.Formatter,
-        max_bytes: int,
-        backup_count: int
-    ) -> Optional[RotatingFileHandler]:
+    def _create_file_handler(log_file: str, level: int, formatter: logging.Formatter, max_bytes: int, backup_count: int) -> Optional[RotatingFileHandler]:
         try:
-            handler = RotatingFileHandler(
-                log_file,
-                maxBytes=max_bytes,
-                backupCount=backup_count,
-                encoding='utf-8'
-            )
+            handler = RotatingFileHandler(log_file, maxBytes=max_bytes, backupCount=backup_count, encoding='utf-8')
             handler.setLevel(level)
             handler.setFormatter(formatter)
-            handler.delay = True  # ИСПРАВЛЕНИЕ: Откладывает открытие файла до первой записи (Фикс блокировок Windows)
             return handler
         except Exception as e:
-            print(f"Error: Could not create file handler for {log_file}: {e}", file=sys.stderr)
+            print(f"Error: Ошибка создания хендлера для {log_file}: {e}", file=sys.stderr)
             return None
     
     @staticmethod
     def setup_logging(config: Optional[LoggerConfig] = None) -> None:
-        """Configure logging for the application with rotating file handlers safely."""
+        """Потокобезопасная настройка системы логирования приложения."""
         with Logger._lock:
             if Logger._logger_configured:
                 return
@@ -123,55 +121,58 @@ class Logger:
             return
         
         if cfg.clear_on_startup:
-            Logger._clear_existing_logs([Logger.LOG_FILE(), Logger.DETAILED_LOG_FILE()], cfg.backup_count)
+            log_files = [Logger.LOG_FILE(), Logger.DETAILED_LOG_FILE()]
+            Logger._clear_existing_logs(log_files, cfg.backup_count)
         
-        # ИСПРАВЛЕНИЕ: Добавлен вывод имени потока [%(threadName)s] и точный формат времени
-        detailed_formatter = logging.Formatter(
-            fmt='%(asctime)s [%(threadName)s] %(levelname)-8s %(name)s -> %(message)s',
-            datefmt='%Y-%m-%d %H:%M:%S'
-        )
+        standard_formatter = logging.Formatter(fmt='[%(asctime)s] [%(levelname)s] - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+        detailed_formatter = logging.Formatter(fmt='[%(asctime)s.%(msecs)03d] [%(levelname)s] [%(threadName)s] [%(name)s:%(lineno)d] - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
         
-        # 1. Основной хэндлер логов (NewProjectName.log)
-        standard_handler = Logger._create_file_handler(
-            Logger.LOG_FILE(), cfg.file_level, detailed_formatter, cfg.max_bytes, cfg.backup_count
-        )
-        if standard_handler:
-            # Применяем фильтр подавления мусорных ошибок ESP
-            standard_handler.addFilter(SuppressErrorFilter(cfg.suppress_patterns))
-            root_logger.addHandler(standard_handler)
-            
-        # 2. Подробный хэндлер логов для дебага памяти (violetwing_detailed.log)
-        detailed_handler = Logger._create_file_handler(
-            Logger.DETAILED_LOG_FILE(), cfg.detailed_level, detailed_formatter, cfg.max_bytes, cfg.backup_count
-        )
+        # Создаем общий фильтр подавления мусора
+        suppress_filter = SuppressErrorFilter(cfg.suppress_patterns) if cfg.suppress_patterns else None
+        
+        # Стандартный лог-файл
+        file_handler = Logger._create_file_handler(Logger.LOG_FILE(), cfg.file_level, standard_formatter, cfg.max_bytes, cfg.backup_count)
+        if file_handler:
+            if suppress_filter: file_handler.addFilter(suppress_filter)
+            root_logger.addHandler(file_handler)
+        
+        # Подробный лог-файл
+        detailed_handler = Logger._create_file_handler(Logger.DETAILED_LOG_FILE(), cfg.detailed_level, detailed_formatter, cfg.max_bytes, cfg.backup_count)
         if detailed_handler:
+            if suppress_filter: detailed_handler.addFilter(suppress_filter)
             root_logger.addHandler(detailed_handler)
-            
-        # 3. Консольный хэндлер (вывод в терминал/CMD)
-        console_handler = logging.StreamHandler(sys.stdout)
-        console_handler.setLevel(cfg.console_level)
-        console_handler.setFormatter(detailed_formatter)
-        console_handler.addFilter(SuppressErrorFilter(cfg.suppress_patterns))
-        root_logger.addHandler(console_handler)
         
-        logging.getLogger(__name__).info("NewProjectName sub-logging systems initialized successfully.")
-
+        # Вывод в консоль
+        stream_handler = logging.StreamHandler()
+        stream_handler.setLevel(cfg.console_level)
+        stream_handler.setFormatter(standard_formatter)
+        if suppress_filter: 
+            stream_handler.addFilter(suppress_filter)
+        root_logger.addHandler(stream_handler)
+        
+        logger = Logger.get_logger()
+        logger.info("Система логирования успешно запущена и защищена от спама памяти.")
+    
     @staticmethod
-    def get_logger(name: str) -> logging.Logger:
-        """Thread-safe factory method to get named logger instances."""
-        if not Logger._logger_configured:
-            Logger.setup_logging()
-        return logging.getLogger(name)
-
+    def get_logger(name: Optional[str] = None) -> logging.Logger:
+        if name:
+            return logging.getLogger(name)
+        if Logger._logger is None:
+            with Logger._lock:
+                if Logger._logger is None:
+                    Logger._logger = logging.getLogger(__name__)
+        return Logger._logger
+    
     @staticmethod
     def shutdown() -> None:
-        """Flushes and closes all active file streams cleanly."""
-        root_logger = logging.getLogger()
-        for handler in root_logger.handlers:
-            try:
-                handler.flush()
-                handler.close()
-            except Exception:
-                pass
-        root_logger.handlers.clear()
-        Logger._logger_configured = False
+        logger = Logger.get_logger()
+        logger.info("Завершение работы системы логирования.")
+        logging.shutdown()
+    
+    @staticmethod
+    def clear_logs() -> None:
+        cfg = Logger._config or LoggerConfig()
+        log_files = [Logger.LOG_FILE(), Logger.DETAILED_LOG_FILE()]
+        Logger._clear_existing_logs(log_files, cfg.backup_count)
+        logger = Logger.get_logger()
+        logger.info("Логи очищены вручную.")

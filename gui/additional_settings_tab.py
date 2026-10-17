@@ -1,4 +1,5 @@
 import customtkinter as ctk
+from classes.config_manager import ConfigManager
 from gui.theme import (
     FONT_TITLE, FONT_SUBTITLE, FONT_SECTION_TITLE, FONT_SECTION_DESCRIPTION,
     FONT_ITEM_LABEL, FONT_ITEM_DESCRIPTION,
@@ -7,126 +8,68 @@ from gui.theme import (
 )
 
 def populate_additional_settings(main_window, frame):
-    """Populate the additional settings frame with configuration options for Bunnyhop and NoFlash."""
-    # Create a scrollable container for settings
-    settings = ctk.CTkScrollableFrame(
-        frame,
-        fg_color="transparent"
-    )
+    """Инициализирует и строит вкладку дополнительных настроек Bunnyhop и NoFlash."""
+    settings = ctk.CTkScrollableFrame(frame, fg_color="transparent")
     settings.pack(fill="both", expand=True, padx=40, pady=40)
     
-    # Configure faster scroll speed by modifying canvas
-    settings._parent_canvas.configure(yscrollincrement=5)
+    # Оптимизируем скорость вертикальной прокрутки меню
+    settings._parent_canvas.configure(yscrollincrement=12)
     
-    # Frame for page title and subtitle
     title_frame = ctk.CTkFrame(settings, fg_color="transparent")
     title_frame.pack(fill="x", pady=(0, 40))
     
-    # Settings title with an icon
-    title_label = ctk.CTkLabel(
-        title_frame,
-        text="⚡  Additional Settings",
-        font=FONT_TITLE,
-        text_color=COLOR_TEXT_PRIMARY,
-        anchor="w"
-    )
-    title_label.pack(side="left")
+    ctk.CTkLabel(
+        title_frame, text="⚡  Additional Settings", font=FONT_TITLE,
+        text_color=COLOR_TEXT_PRIMARY, anchor="w"
+    ).pack(side="left")
     
-    # Subtitle providing context
-    subtitle_label = ctk.CTkLabel(
-        title_frame,
-        text="Configure Bunnyhop and NoFlash preferences",
-        font=FONT_SUBTITLE,
-        text_color=COLOR_TEXT_SECONDARY,
-        anchor="w"
-    )
-    subtitle_label.pack(side="left", padx=(20, 0), pady=(10, 0))
+    ctk.CTkLabel(
+        title_frame, text="Configure Bunnyhop and NoFlash preferences", font=FONT_SUBTITLE,
+        text_color=COLOR_TEXT_SECONDARY, anchor="w"
+    ).pack(side="left", padx=(20, 0), pady=(10, 0))
     
-    # Create sections for Bunnyhop and NoFlash settings
+    # Генерируем подразделы функций
     create_bunnyhop_config_section(main_window, settings)
     create_noflash_config_section(main_window, settings)
 
 def create_bunnyhop_config_section(main_window, parent):
-    """Create Bunnyhop configuration section with related settings."""
+    """Создает подраздел конфигурации Bunnyhop."""
     section = ctk.CTkFrame(parent, **SECTION_STYLE)
     section.pack(fill="x", pady=(0, 30))
     
     header = ctk.CTkFrame(section, fg_color="transparent")
     header.pack(fill="x", padx=40, pady=(40, 30))
     
-    ctk.CTkLabel(
-        header,
-        text="🐰  Bunnyhop Configuration",
-        font=FONT_SECTION_TITLE,
-        text_color=COLOR_TEXT_PRIMARY,
-        anchor="w"
-    ).pack(side="left")
-    
-    ctk.CTkLabel(
-        header,
-        text="Control Bunnyhop behavior",
-        font=FONT_SECTION_DESCRIPTION,
-        text_color=COLOR_TEXT_SECONDARY,
-        anchor="e"
-    ).pack(side="right")
+    ctk.CTkLabel(header, text="🐰  Bunnyhop Configuration", font=FONT_SECTION_TITLE, text_color=COLOR_TEXT_PRIMARY, anchor="w").pack(side="left")
+    ctk.CTkLabel(header, text="Control Bunnyhop behavior", font=FONT_SECTION_DESCRIPTION, text_color=COLOR_TEXT_SECONDARY, anchor="e").pack(side="right")
     
     settings_list = [
         ("Jump Key", "entry", "JumpKey", "Key to activate Bunnyhop (e.g., 'space' or 'mouse4')"),
-        ("Jump Delay", "entry", "JumpDelay", "Delay between simulated jumps in ticks/seconds (0.01-0.5)")
+        ("Jump Delay", "entry", "JumpDelay", "Delay between jumps in seconds (0.01-0.5)")
     ]
     
     for i, (label_text, widget_type, key, description) in enumerate(settings_list):
-        item_frame = create_setting_item(
-            section, 
-            label_text, 
-            description, 
-            widget_type, 
-            key, 
-            main_window,
-            is_last=(i == len(settings_list) - 1)
-        )
+        create_setting_item(section, label_text, description, widget_type, key, main_window, is_last=(i == len(settings_list) - 1))
+
 def create_noflash_config_section(main_window, parent):
-    """Create NoFlash configuration section with related settings."""
+    """Создает подраздел конфигурации NoFlash."""
     section = ctk.CTkFrame(parent, **SECTION_STYLE)
     section.pack(fill="x", pady=(0, 30))
     
     header = ctk.CTkFrame(section, fg_color="transparent")
     header.pack(fill="x", padx=40, pady=(40, 30))
     
-    ctk.CTkLabel(
-        header,
-        text="🌞  NoFlash Configuration",
-        font=FONT_SECTION_TITLE,
-        text_color=COLOR_TEXT_PRIMARY,
-        anchor="w"
-    ).pack(side="left")
+    ctk.CTkLabel(header, text="🌞  NoFlash Configuration", font=FONT_SECTION_TITLE, text_color=COLOR_TEXT_PRIMARY, anchor="w").pack(side="left")
+    ctk.CTkLabel(header, text="Control flash suppression behavior", font=FONT_SECTION_DESCRIPTION, text_color=COLOR_TEXT_SECONDARY, anchor="e").pack(side="right")
     
-    ctk.CTkLabel(
-        header,
-        text="Control flash suppression behavior",
-        font=FONT_SECTION_DESCRIPTION,
-        text_color=COLOR_TEXT_SECONDARY,
-        anchor="e"
-    ).pack(side="right")
-    
-    # ИСПРАВЛЕНИЕ: Описание изменено на секунды ослепления для синхронизации с памятью игры
     settings_list = [
-        ("Flash Suppression Strength", "slider", "FlashSuppressionStrength", "Maximum flash duration in seconds (0.0s = Full NoFlash, 4.5s = Default)")
+        ("Flash Suppression Strength", "slider", "FlashSuppressionStrength", "Strength of flash suppression (0.0-255.0) | 255.0 = Default, 0.0 = Safe NoFlash")
     ]
     
     for i, (label_text, widget_type, key, description) in enumerate(settings_list):
-        item_frame = create_setting_item(
-            section, 
-            label_text, 
-            description, 
-            widget_type, 
-            key, 
-            main_window,
-            is_last=(i == len(settings_list) - 1)
-        )
-
+        create_setting_item(section, label_text, description, widget_type, key, main_window, is_last=(i == len(settings_list) - 1))
 def create_setting_item(parent, label_text, description, widget_type, key, main_window, is_last=False):
-    """Create a standardized setting item with improved styling."""
+    """Создает стандартизированную строку настройки с текстовым описанием и виджетом."""
     item_frame = ctk.CTkFrame(parent, fg_color="transparent")
     item_frame.pack(fill="x", padx=40, pady=(0, 30 if not is_last else 40))
     
@@ -147,14 +90,19 @@ def create_setting_item(parent, label_text, description, widget_type, key, main_
     
     if widget_type == "entry":
         widget = ctk.CTkEntry(widget_frame, justify="center", **ENTRY_STYLE)
+        
         if key == "JumpKey":
             main_window.jump_key_entry = widget
-            widget.insert(0, main_window.bunnyhop.config.get('Bunnyhop', {}).get('JumpKey', 'space'))
+            current_key = ConfigManager.get_value("Bunnyhop", "JumpKey", default="space")
+            widget.delete(0, "end")
+            widget.insert(0, str(current_key))
             widget.bind("<FocusOut>", lambda e: main_window.save_settings())
             widget.bind("<Return>", lambda e: main_window.save_settings())
         elif key == "JumpDelay":
             main_window.jump_delay_entry = widget
-            widget.insert(0, str(main_window.bunnyhop.config.get('Bunnyhop', {}).get('JumpDelay', 0.015)))
+            current_delay = ConfigManager.get_value("Bunnyhop", "JumpDelay", default=0.01)
+            widget.delete(0, "end")
+            widget.insert(0, str(current_delay))
             widget.bind("<FocusOut>", lambda e: main_window.save_settings())
             widget.bind("<Return>", lambda e: main_window.save_settings())
         widget.pack()
@@ -167,25 +115,22 @@ def create_setting_item(parent, label_text, description, widget_type, key, main_
         value_frame.pack(side="right", padx=(15, 0))
         value_frame.pack_propagate(False)
         
-        value_label = ctk.CTkLabel(
-            value_frame,
-            text=f"{main_window.noflash.config['NoFlash'].get(key, 0.0):.1f}s",
-            font=FONT_ITEM_LABEL,
-            text_color=COLOR_TEXT_PRIMARY
-        )
+        # Получаем значение альфа-канала ослепления из конфига (дефолт 255.0 - обычный белый экран)
+        current_strength = float(ConfigManager.get_value("NoFlash", "FlashSuppressionStrength", default=255.0))
+        
+        value_label = ctk.CTkLabel(value_frame, text=f"{current_strength:.0f}", font=FONT_ITEM_LABEL, text_color=COLOR_TEXT_PRIMARY)
         value_label.pack(expand=True)
         
-        # ИСПРАВЛЕНИЕ: Диапазон слайдера изменен на 0.0 - 5.0 секунд ослепления 
-        # (вместо старых некорректных 0-100 процентов)
+        # Диапазон изменен до 255.0 под логику m_flFlashMaxAlpha в Source 2
         widget = ctk.CTkSlider(
             slider_container,
             from_=0.0,
-            to=5.0,
-            number_of_steps=50,
+            to=255.0,
+            number_of_steps=255,
             command=lambda e: update_slider_value(e, key, main_window),
             **SLIDER_STYLE
         )
-        widget.set(main_window.noflash.config["NoFlash"].get(key, 0.0))
+        widget.set(current_strength)
         widget.pack(side="left")
         
         widget.value_label = value_label
@@ -194,13 +139,16 @@ def create_setting_item(parent, label_text, description, widget_type, key, main_
 
     return item_frame
 
-def update_slider_value(event, key, main_window):
-    """Update the slider value label and save settings."""
-    slider_attr = main_window.__getattribute__(f"{key}_slider")
-    value = round(slider_attr.get(), 1)
-    slider_attr.value_label.configure(text=f"{value:.1f}s")
-    
-    # Записываем значение и делаем бесшумное сохранение без фризов
-    if main_window.noflash.config["NoFlash"][key] != value:
-        main_window.noflash.config["NoFlash"][key] = value
-        main_window.save_settings(show_message=False)
+def update_slider_value(value, key, main_window):
+    """Обновляет числовой маркер ползунка и безопасно сохраняет настройки NoFlash."""
+    slider = getattr(main_window, f"{key}_slider", None)
+    if slider and hasattr(slider, 'value_label'):
+        slider.value_label.configure(text=f"{value:.0f}")
+        
+        # Записываем значение напрямую через ConfigManager, исключая подвисания интерфейса
+        ConfigManager.set_value("NoFlash", key, float(value))
+        
+        # Синхронизируем новые параметры с запущенным потоком NoFlash
+        if hasattr(main_window, 'client_manager'):
+            current_config = ConfigManager.load_config()
+            main_window.client_manager.update_running_feature_configs(current_config)

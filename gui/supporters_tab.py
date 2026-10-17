@@ -85,13 +85,15 @@ def populate_supporters(main_window, frame):
             data = orjson.loads(response.content)
             main_window.root.after(0, lambda: update_supporters_ui(data, loading_container, stats_frame))
         except requests.exceptions.RequestException as e:
-            main_window.root.after(0, lambda: show_error(loading_container, f"Failed to fetch supporters data: {e}"))
+            err = str(e)
+            main_window.root.after(0, lambda msg=err: show_error(loading_container, f"Failed to fetch supporters data: {msg}"))
             logger.error(f"Failed to fetch supporters data: {e}")
         except orjson.JSONDecodeError as e:
             main_window.root.after(0, lambda: show_error(loading_container, "Invalid JSON data received"))
             logger.error(f"Invalid JSON data: {e}")
         except Exception as e:
-            main_window.root.after(0, lambda: show_error(loading_container, str(e)))
+            err = str(e)
+            main_window.root.after(0, lambda msg=err: show_error(loading_container, msg))
             logger.error(f"Unexpected error: {e}")
     
     def update_supporters_ui(data, loading_container, stats_frame):

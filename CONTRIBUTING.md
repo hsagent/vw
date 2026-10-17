@@ -1,6 +1,6 @@
-# 🤝 Contributing to VioletWing
+# 🤝 Contributing to My Project
 
-First off, **thank you** for considering contributing to VioletWing! It's people like you who make this project better for the entire community. Whether you're fixing a bug, adding a feature, or improving documentation, every contribution matters.
+First off, **thank you** for considering contributing to My Project! It's people like you who make this project better for the entire community. Whether you're fixing a bug, adding a feature, or improving documentation, every contribution matters.
 
 ## 📋 Table of Contents
 
@@ -66,7 +66,7 @@ Ready to contribute? Here's how to get started in 5 minutes:
 ```bash
 # Fork the repository on GitHub, then clone your fork
 git clone https://github.com/hsagent/vw.git
-cd VioletWing
+cd vw
 ```
 
 ### 2️⃣ Set Up Remote
@@ -127,7 +127,7 @@ python main.py
 python main.py
 
 # Check for errors in logs
-# Location: %LOCALAPPDATA%\VioletWing\logs\
+# Location: %LOCALAPPDATA%\My Project\logs\
 ```
 
 #### Feature-Specific Testing
@@ -314,8 +314,8 @@ Use the [Issues tab](https://github.com/hsagent/vw/issues) and include:
 - **Environment**:
   - OS: Windows 11 Pro 25H2
   - Python: 3.12.10
-  - VioletWing Version: 1.2.8.9
-- **Logs**: Attach relevant excerpts from `violetwing.log` or `violetwing_detailed.log`
+  - My Project Version: 1.2.8.9
+- **Logs**: Attach relevant excerpts from `myproject.log` or `myproject_detailed.log`
 
 #### Optional But Helpful
 
@@ -420,7 +420,7 @@ _Describe the proposed solution. Describe what the new feature is intended to do
 
 ## 💡 Feature Requests
 
-Have an idea to make VioletWing better? We'd love to hear it!
+Have an idea to make My Project better? We'd love to hear it!
 
 ### Submitting Feature Requests
 
@@ -458,7 +458,7 @@ Have an idea to make VioletWing better? We'd love to hear it!
 
 - **Documentation**: Check the README and in-app FAQ
 - **Issues**: Search existing issues for answers
-- **Logs**: Check `%LOCALAPPDATA%\VioletWing\logs\` for error details
+- **Logs**: Check `%LOCALAPPDATA%\My Project\logs\` for error details
 
 ### Community Channels
 
@@ -477,7 +477,7 @@ We're a community-driven project, so response times vary:
 
 ## 🙏 Thank You!
 
-Every contribution, no matter how small, makes VioletWing better for everyone. Thank you for taking the time to contribute!
+Every contribution, no matter how small, makes My Project better for everyone. Thank you for taking the time to contribute!
 
 ### Recognition
 

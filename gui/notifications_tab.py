@@ -52,7 +52,7 @@ def populate_notifications(main_window, frame):
     # Subtitle
     subtitle_label = ctk.CTkLabel(
         title_container,
-        text="Latest news and updates for VioletWing",
+        text="Latest news and updates for My Project",
         font=FONT_SUBTITLE,
         text_color=COLOR_TEXT_SECONDARY
     )
@@ -113,13 +113,15 @@ def populate_notifications(main_window, frame):
                 return
             main_window.root.after(0, lambda: update_notifications_ui(valid_notifications, loading_card, notifications_container))
         except requests.exceptions.RequestException as e:
-            main_window.root.after(0, lambda: show_error(loading_card, f"Failed to fetch notifications: {str(e)}"))
+            err = str(e)
+            main_window.root.after(0, lambda msg=err: show_error(loading_card, f"Failed to fetch notifications: {msg}"))
             logger.error(f"Failed to fetch notifications data: {e}")
         except orjson.JSONDecodeError as e:
             main_window.root.after(0, lambda: show_error(loading_card, "Invalid JSON data received"))
             logger.error(f"Invalid JSON data: {e}")
         except Exception as e:
-            main_window.root.after(0, lambda: show_error(loading_card, f"Unexpected error: {str(e)}"))
+            err = str(e)
+            main_window.root.after(0, lambda msg=err: show_error(loading_card, f"Unexpected error: {msg}"))
             logger.error(f"Unexpected error: {e}")
 
     def update_notifications_ui(data, loading_card, container):
@@ -179,7 +181,7 @@ def populate_notifications(main_window, frame):
         )
         title_label.pack(side="left", fill="x", expand=True)
         if url:
-            title_label.bind("<Button-1>", lambda e: webbrowser.open(url))
+            title_label.bind("<Button-1>", lambda e, u=url: webbrowser.open(u))
 
         # Timestamp
         timestamp = notification.get('timestamp', '')

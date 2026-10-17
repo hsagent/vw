@@ -73,7 +73,7 @@ def populate_faq(main_window, frame):
         ),
         (
             "Is this tool safe to use?",
-            "VioletWing is for educational purposes only. Using automation tools in online games like Counter-Strike 2 violates terms of service and risks account bans, especially on VAC-secured servers, FACEIT, or ESEA. Use it in offline modes or private servers to avoid detection. Always review the 'Usage Disclaimer' in the Legal and Disclaimer collection before proceeding."
+            "My Project is for educational purposes only. Using automation tools in online games like Counter-Strike 2 violates terms of service and risks account bans, especially on VAC-secured servers, FACEIT, or ESEA. Use it in offline modes or private servers to avoid detection. Always review the 'Usage Disclaimer' in the Legal and Disclaimer collection before proceeding."
         ),
         (
             "How do I configure the trigger key?",
@@ -89,11 +89,11 @@ def populate_faq(main_window, frame):
         ),
         (
             "Can I use these features on FACEIT or ESEA?",
-            "No, using VioletWing on anti-cheat platforms like FACEIT, ESEA, or VAC-secured servers is prohibited and will likely result in a permanent ban. Features like TriggerBot, Overlay, Bunnyhop, and NoFlash are detected by anti-cheat systems. Use only in offline modes, private servers, or casual matches. For safety, read the 'Usage Disclaimer' in the Legal and Disclaimer collection."
+            "No, using My Project on anti-cheat platforms like FACEIT, ESEA, or VAC-secured servers is prohibited and will likely result in a permanent ban. Features like TriggerBot, Overlay, Bunnyhop, and NoFlash are detected by anti-cheat systems. Use only in offline modes, private servers, or casual matches. For safety, read the 'Usage Disclaimer' in the Legal and Disclaimer collection."
         ),
         (
             "How do I update the offsets?",
-            "VioletWing automatically fetches offsets from https://github.com/a2x/cs2-dumper on startup, ensuring compatibility with Counter-Strike 2 updates. Check the last update time on the Dashboard tab. If fetching fails, manually download offsets.json, client_dll.json, and buttons.json from the cs2-dumper repository and update the URLs in utility.py. For troubleshooting, see 'Offset Fetching and Management' in the Features collection."
+            "My Project automatically fetches offsets from https://github.com/a2x/cs2-dumper on startup, ensuring compatibility with Counter-Strike 2 updates. Check the last update time on the Dashboard tab. If fetching fails, manually download offsets.json, client_dll.json, and buttons.json from the cs2-dumper repository and update the URLs in utility.py. For troubleshooting, see 'Offset Fetching and Management' in the Features collection."
         ),
         (
             "Why isn't the TriggerBot triggering?",
@@ -109,23 +109,23 @@ def populate_faq(main_window, frame):
         ),
         (
             "Why is NoFlash not working?",
-            "If NoFlash fails: 1) Ensure it's enabled in General Settings. 2) Verify offsets are updated (check Dashboard). 3) Adjust FlashSuppressionStrength (0.0 for full removal) in Additional Settings or config.json. 4) Check for anti-cheat interference. Look for 'Error disabling flash' in logs. Restart VioletWing to refresh offsets. See 'NoFlash Not Effective' in Troubleshooting."
+            "If NoFlash fails: 1) Ensure it's enabled in General Settings. 2) Verify offsets are updated (check Dashboard). 3) Adjust FlashSuppressionStrength (0.0 for full removal) in Additional Settings or config.json. 4) Check for anti-cheat interference. Look for 'Error disabling flash' in logs. Restart My Project to refresh offsets. See 'NoFlash Not Effective' in Troubleshooting."
         ),
         (
             "What should I do if the app crashes?",
-            r"If VioletWing crashes: 1) Restart the app and ensure Counter-Strike 2 is running. 2) Check for updates (stable or pre-release) in the Notifications tab or https://github.com/Jesewe/VioletWing/releases. 3) Verify Python version (3.8 to <3.12.5) and dependencies (see Installation Guide). 4) Disable antivirus temporarily. 5) Review logs in %LOCALAPPDATA%\Requests\ItsJesewe\crashes\vw_logs.log for errors. See 'General Unexpected Errors' in Troubleshooting."
+            r"If My Project crashes: 1) Restart the app and ensure Counter-Strike 2 is running. 2) Check for updates (stable or pre-release) in the Notifications tab or https://github.com/hsagent/vw/releases. 3) Verify Python version (3.8 to <3.12.5) and dependencies (see Installation Guide). 4) Disable antivirus temporarily. 5) Review logs in %LOCALAPPDATA%\My Project\logs\myproject.log for errors. See 'General Unexpected Errors' in Troubleshooting."
         ),
         (
             "Is there a hotkey to toggle features on/off?",
             "TriggerBot supports a toggle hotkey (set in Trigger Settings, e.g., 'x' or 'mouse4') with sound feedback (1000Hz for on, 500Hz for off). Other features (Overlay, Bunnyhop, NoFlash) are toggled via the General Settings tab in the GUI. To change configs quickly, edit config.json (dynamic updates apply instantly). See 'Dynamic Configuration Updates' and 'TriggerBot Overview' for more."
         ),
         (
-            "Why doesn't VioletWing work properly in fullscreen mode?",
-            r"Fullscreen mode may cause issues like a black background for the Overlay (ESP) due to rendering conflicts with PyMeow or graphics card settings. To fix: 1) Switch Counter-Strike 2 to windowed or borderless mode in game settings. 2) Ensure PyMeow is installed correctly (see Installation Guide). 3) Test with onboard graphics if using a dedicated GPU. 4) Check for client updates (stable or pre-release) at https://github.com/Jesewe/VioletWing/releases. For details, see 'Overlay Not Displaying' in Troubleshooting."
+            "Why doesn't My Project work properly in fullscreen mode?",
+            r"Fullscreen mode may cause issues like a black background for the Overlay (ESP) due to rendering conflicts with PyMeow or graphics card settings. To fix: 1) Switch Counter-Strike 2 to windowed or borderless mode in game settings. 2) Ensure PyMeow is installed correctly (see Installation Guide). 3) Test with onboard graphics if using a dedicated GPU. 4) Check for client updates (stable or pre-release) at https://github.com/hsagent/vw/releases. For details, see 'Overlay Not Displaying' in Troubleshooting."
         ),
         (
             "What should I do if I encounter an error?",
-            r"For any error: 1) Check the Logs tab or %LOCALAPPDATA%\Requests\ItsJesewe\crashes\vw_logs.log for details (e.g., 'Failed to read memory' or 'Offset error'). 2) Ensure you have the latest VioletWing client (check stable and pre-release versions at https://github.com/Jesewe/VioletWing/releases). 3) Verify offsets are updated (Dashboard). 4) Restart VioletWing and CS2. 5) Disable antivirus if blocking. See 'General Unexpected Errors' or specific Troubleshooting articles for your error."
+            r"For any error: 1) Check the Logs tab or %LOCALAPPDATA%\My Project\logs\myproject.log for details (e.g., 'Failed to read memory' or 'Offset error'). 2) Ensure you have the latest My Project client (check stable and pre-release versions at https://github.com/hsagent/vw/releases). 3) Verify offsets are updated (Dashboard). 4) Restart My Project and CS2. 5) Disable antivirus if blocking. See 'General Unexpected Errors' or specific Troubleshooting articles for your error."
         )
     ]
     
@@ -156,7 +156,7 @@ def populate_faq(main_window, frame):
     # Footer guidance text
     ctk.CTkLabel(
         footer_content,
-        text="Explore these resources for more help or to contribute to VioletWing:",
+        text="Explore these resources for more help or to contribute to My Project:",
         font=FONT_ITEM_DESCRIPTION,
         text_color=COLOR_TEXT_SECONDARY
     ).pack(pady=(0, 20))
@@ -191,21 +191,7 @@ def populate_faq(main_window, frame):
         width=160,
         **BUTTON_STYLE_PRIMARY
     )
-    github_releases_btn.pack(side="left", padx=(0, 15))
-
-    # Help Center link
-    def open_help_center():
-        import webbrowser
-        webbrowser.open("https://violetwing.featurebase.app/en/help")
-    
-    help_center_btn = ctk.CTkButton(
-        links_container,
-        text="📚 Help Center",
-        command=open_help_center,
-        width=160,
-        **BUTTON_STYLE_PRIMARY
-    )
-    help_center_btn.pack(side="left", padx=(0, 15))
+    github_releases_btn.pack(side="left", padx=(0, 0))
     
     # Additional footer text
     ctk.CTkLabel(

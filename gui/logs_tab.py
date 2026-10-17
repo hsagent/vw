@@ -100,12 +100,8 @@ def populate_logs(main_window, frame):
     )
     main_window.log_text.pack(fill="both", expand=True, padx=25, pady=25)
 
-    # Load existing logs and set initial position
+    # Load existing logs; позиция чтения обновляется внутри _load_logs_safely
     _load_logs_safely(main_window)
-    if os.path.exists(Logger.LOG_FILE()):
-        main_window.last_log_position = os.path.getsize(Logger.LOG_FILE())
-    else:
-        main_window.last_log_position = 0
 
 def create_title_section(parent):
     """Create the title and subtitle for the settings page."""
@@ -135,11 +131,16 @@ def create_title_section(parent):
     ).pack(anchor="w", pady=(8, 0))
 
 def _load_logs_safely(main_window):
-    """Safely load logs with duplicate prevention and proper error handling."""
+    """Догружает в текстовое поле только новые строки лога.
+
+    Раньше новые строки фильтровались по принципу «такой строки ещё нет в
+    виджете», из-за чего повторяющиеся записи (например, два одинаковых
+    предупреждения) терялись. Теперь читаем файл с last_log_position.
+    """
     logger = Logger.get_logger(__name__)
+    log_path = Logger.LOG_FILE()
     try:
-        # Display welcome message if log file doesn't exist
-        if not os.path.exists(Logger.LOG_FILE()):
+        if not os.path.exists(log_path):
             welcome_msg = (
                 "=== Application Logs ===\n"
                 "Welcome to the logs viewer!\n"
@@ -148,46 +149,54 @@ def _load_logs_safely(main_window):
                 "[INFO] Logs tab loaded\n"
             )
             _replace_content(main_window, welcome_msg)
+            main_window.last_log_position = 0
             return
 
-        # Read all log lines from the file
-        with open(Logger.LOG_FILE(), 'r', encoding='utf-8') as log_file:
-            raw_lines = log_file.read().splitlines()
+        size = os.path.getsize(log_path)
+        position = getattr(main_window, "last_log_position", 0) or 0
+        if position > size:  # файл пересоздан или обрезан
+            position = 0
 
-        # Get currently displayed lines to avoid duplicates
-        displayed = main_window.log_text.get("1.0", "end-1c").splitlines()
-        # Filter out duplicates
-        new_lines = [line for line in raw_lines if line not in displayed]
+        new_text = ""
+        if size > position:
+            with open(log_path, "rb") as log_file:
+                log_file.seek(position)
+                new_text = log_file.read().decode("utf-8", errors="replace")
+            # Windows-логи содержат \r\n — приводим к \n, иначе в текстовом
+            # виджете появляются лишние пустые строки.
+            new_text = new_text.replace("\r\n", "\n").replace("\r", "\n")
+        main_window.last_log_position = size
 
-        if new_lines:
+        if not new_text:
+            if position == 0:
+                empty_msg = (
+                    "=== Application Logs ===\n"
+                    "Log file exists but is empty.\n"
+                    "New logs will appear here as they are generated.\n\n"
+                    "[INFO] Empty log file detected\n"
+                )
+                _replace_content(main_window, empty_msg)
+            return
+
+        if not new_text.endswith("\n"):
+            new_text += "\n"
+
+        if position == 0:
+            _replace_content(main_window, new_text)
+        else:
             main_window.log_text.configure(state="normal")
-            if not displayed:
-                # Initial load: replace all content
-                main_window.log_text.delete("1.0", "end")
-                main_window.log_text.insert("1.0", "\n".join(new_lines) + "\n")
-            else:
-                # Append new lines only
-                main_window.log_text.insert("end", "\n".join(new_lines) + "\n")
+            main_window.log_text.insert("end", new_text)
             main_window.log_text.see("end")
             main_window.log_text.configure(state="disabled")
-        elif not displayed:
-            # Display message if log file is empty
-            empty_msg = (
-                "=== Application Logs ===\n"
-                "Log file exists but is empty.\n"
-                "New logs will appear here as they are generated.\n\n"
-                "[INFO] Empty log file detected\n"
-            )
-            _replace_content(main_window, empty_msg)
 
     except FileNotFoundError:
-        logger.warning(f"Log file {Logger.LOG_FILE()} not found")
+        logger.warning(f"Log file {log_path} not found")
         _show_error_message(main_window, "Log file not found")
     except PermissionError:
-        logger.error(f"Permission denied reading log file {Logger.LOG_FILE()}")
+        logger.error(f"Permission denied reading log file {log_path}")
         _show_error_message(main_window, "Permission denied accessing log file")
     except UnicodeDecodeError:
-        logger.error(f"Encoding error reading log file {Logger.LOG_FILE()}")
+        logger.error(f"Encoding error reading log file {log_path}")
         _show_error_message(main_window, "Log file encoding error")
     except Exception as e:
         logger.error(f"Unexpected error loading logs: {e}")

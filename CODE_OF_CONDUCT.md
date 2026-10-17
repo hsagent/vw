@@ -1,8 +1,8 @@
-# VioletWing Code of Conduct
+# My Project Code of Conduct
 
 ## Our Pledge
 
-We, as contributors and maintainers of the VioletWing project, pledge to foster a welcoming, inclusive, and harassment-free environment for everyone, regardless of age, body size, disability, ethnicity, sex characteristics, gender identity and expression, level of experience, education, socio-economic status, nationality, personal appearance, race, religion, or sexual identity and orientation. We are committed to creating a positive and respectful community that encourages collaboration and supports the development of the VioletWing tool for Counter-Strike 2.
+We, as contributors and maintainers of the My Project, pledge to foster a welcoming, inclusive, and harassment-free environment for everyone, regardless of age, body size, disability, ethnicity, sex characteristics, gender identity and expression, level of experience, education, socio-economic status, nationality, personal appearance, race, religion, or sexual identity and orientation. We are committed to creating a positive and respectful community that encourages collaboration and supports the development of the My Project tool for Counter-Strike 2.
 
 ## Our Standards
 
@@ -24,11 +24,11 @@ Unacceptable behaviors include:
 
 ## Scope
 
-This Code of Conduct applies to all project-related spaces, including the GitHub repository ([https://github.com/Jesewe/VioletWing](https://github.com/Jesewe/VioletWing)), issues, pull requests, discussions, and any public or private communication channels (e.g., email, Discord, or Boosty) related to VioletWing. It also applies when representing the project publicly, such as through contributions, social media posts, or events.
+This Code of Conduct applies to all project-related spaces, including the GitHub repository ([https://github.com/hsagent/vw](https://github.com/hsagent/vw)), issues, pull requests, discussions, and any public or private communication channels (e.g., email, Discord, or Boosty) related to My Project. It also applies when representing the project publicly, such as through contributions, social media posts, or events.
 
 ## Enforcement Responsibilities
 
-The VioletWing maintainers, led by the project owner (contact: jesewescience@outlook.com), are responsible for enforcing this Code of Conduct. They will:
+The My Project maintainers, led by the project owner (contact: jesewescience@outlook.com), are responsible for enforcing this Code of Conduct. They will:
 
 - Clarify standards of acceptable behavior.
 - Take fair and appropriate action in response to violations.
@@ -36,7 +36,7 @@ The VioletWing maintainers, led by the project owner (contact: jesewescience@out
 
 ## Enforcement
 
-Report any abusive, harassing, or unacceptable behavior to jesewescience@outlook.com. All reports will be reviewed promptly, fairly, and confidentially, respecting the privacy and security of the reporter. Maintainers may request additional details, such as screenshots or logs (e.g., from `%LOCALAPPDATA%\VioletWing\logs\violetwing.log`), to investigate issues thoroughly.
+Report any abusive, harassing, or unacceptable behavior to jesewescience@outlook.com. All reports will be reviewed promptly, fairly, and confidentially, respecting the privacy and security of the reporter. Maintainers may request additional details, such as screenshots or logs (e.g., from `%LOCALAPPDATA%\My Project\logs\myproject.log`), to investigate issues thoroughly.
 
 ### Enforcement Guidelines
 

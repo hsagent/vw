@@ -2,7 +2,7 @@
 setlocal enabledelayedexpansion
 
 :: Set variables
-set "PROJECT_NAME=VioletWing"
+set "PROJECT_NAME=MyProject"
 set "MAIN_FILE=main.py"
 set "OUTPUT_DIR=output"
 set "ICON_FILE=src\img\icon.ico"
@@ -10,7 +10,7 @@ set "VERSION_FILE=version.txt"
 
 :: Display header
 echo ========================================
-echo      VioletWing Build Script
+echo      MyProject Build Script
 echo ========================================
 echo.
 
