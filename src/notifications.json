@@ -1,0 +1,51 @@
+[
+  {
+    "number": "1",
+    "title": "My Project Notifications",
+    "url": "https://github.com/hsagent/vw",
+    "timestamp": "2025-07-12",
+    "message": "Introducing My Project Notifications, a new feature that keeps you updated with the latest changes and improvements in the My Project. Stay informed about new releases, bug fixes, and enhancements directly from the development team."
+  },
+  {
+    "number": "2",
+    "title": "Offsets in My Project",
+    "url": "https://github.com/hsagent/vw?tab=readme-ov-file#troubleshooting",
+    "timestamp": "2025-07-30",
+    "message": "If you see an error message saying \"Could not read memory at\", this does not mean that there is a program error. We have no influence on the operation of offsets. Please wait for the a2x/cs2-dumper offset update."
+  },
+  {
+    "number": "3",
+    "title": "My Project Update (Hotfix)",
+    "url": "https://github.com/hsagent/vw/releases/tag/v1.2.7",
+    "timestamp": "2025-08-06",
+    "message": "My Project has been updated to version 1.2.7. This release includes various bug fixes and performance improvements."
+  },
+  {
+    "number": "4",
+    "title": "My Project Update 1.2.8 (ESP fix)",
+    "url": "https://github.com/hsagent/vw/releases/tag/v1.2.8",
+    "timestamp": "2025-08-16",
+    "message": "My Project has been updated to version 1.2.8. This release includes a fix for the ESP feature."
+  },
+  {
+    "number": "5",
+    "title": "VACNet Anti-Cheat Update Warning",
+    "url": "https://github.com/hsagent/vw?tab=readme-ov-file#disclaimer",
+    "timestamp": "2025-09-26",
+    "message": "VACNet, the anti-cheat system for Counter-Strike 2, has been significantly improved. Using My Project or similar tools may result in detection and bans. Proceed with caution and use at your own risk."
+  },
+  {
+    "number": "6",
+    "title": "Important VACNet Anti-Cheat Update Notice",
+    "url": "https://github.com/hsagent/vw/issues/119",
+    "timestamp": "2025-10-03",
+    "message": "Attention Counter-Strike 2 players: The recent VACNet anti-cheat update has enhanced detection capabilities. Continuous use of trigger bots or similar tools, including My Project, from start to finish in matches may lead to detection, resulting in account restrictions of 20 hours or more. There is no issue with the tools themselves, but aggressive use increases the risk of detection. Please play cautiously and at your own risk to avoid bans."
+  },
+  {
+    "number": "7",
+    "title": "Support My Project on Ko-fi!",
+    "url": "https://github.com/hsagent/vw",
+    "timestamp": "2025-11-28",
+    "message": "If you find My Project helpful and would like to support its development, consider buying me a coffee on Ko-fi! Your support helps keep the project alive and allows me to continue improving My Project for the community. Thank you for your generosity!"
+  }
+]
