@@ -2,11 +2,9 @@ import os
 import requests
 import psutil
 import sys
-import subprocess
 import pygetwindow as gw
-import orjson
+from classes import json_compat as orjson
 from packaging import version
-from dateutil.parser import parse as parse_date
 from pathlib import Path
 
 from classes.config_manager import ConfigManager, COLOR_CHOICES
@@ -47,10 +45,12 @@ class Utility:
                 client = orjson.loads(Path(config.get("General", {}).get("ClientDLLFile", config_dir / "client_dll.json")).read_bytes())
                 buttons = orjson.loads(Path(config.get("General", {}).get("ButtonsFile", config_dir / "buttons.json")).read_bytes())
                 return offset, client, buttons
-            except Exception:
+            except Exception as e:
+                logger.warning("Не удалось загрузить локальные оффсеты: %s. Используется сетевой источник.", e)
                 config["General"]["OffsetSource"] = "a2x"
-                ConfigManager.save_config(config)
-                return Utility.fetch_offsets()
+                if not ConfigManager.save_config(config):
+                    logger.warning("Не удалось сохранить смену источника оффсетов в конфигурации.")
+                source = "a2x"
         
         try:
             available_sources = Utility.load_offset_sources()
@@ -78,25 +78,41 @@ class Utility:
 
     @staticmethod
     def check_for_updates(current_version):
-        """Проверяет обновления на GitHub."""
+        """Возвращает безопасные метаданные последнего релиза GitHub."""
         try:
-            response = requests.get("https://api.github.com/repos/hsagent/vw/releases/latest", timeout=10, verify=True)
-            if response.status_code == 200:
-                data = response.json()
-                latest_version = data.get("tag_name", "")
-                return latest_version, latest_version != current_version
-            return None, False
-        except Exception as e:
+            response = requests.get(
+                "https://api.github.com/repos/hsagent/vw/releases/latest",
+                timeout=10,
+                verify=True,
+            )
+            response.raise_for_status()
+            data = response.json()
+            latest_version = str(data.get("tag_name") or "").strip()
+            release_url = str(data.get("html_url") or "").strip()
+            if not latest_version or not release_url.startswith("https://github.com/"):
+                return None
+
+            current = version.parse(str(current_version).strip().lstrip("vV"))
+            latest = version.parse(latest_version.lstrip("vV"))
+            return {
+                "latest_version": latest_version,
+                "update_available": latest > current,
+                "is_prerelease": bool(data.get("prerelease", False)),
+                "release_url": release_url,
+            }
+        except (requests.RequestException, ValueError, TypeError) as e:
             logger.debug(f"Ошибка проверки обновлений: {e}")
-            return None, False
+            return None
     @staticmethod
     def resource_path(relative_path):
-        """Возвращает путь к ресурсу, поддерживая нормальный запуск и сборку в .exe."""
+        """Возвращает абсолютный путь к ресурсу для исходников и PyInstaller."""
         try:
             if hasattr(sys, '_MEIPASS'):
-                return os.path.join(sys._MEIPASS, relative_path)
-            return os.path.join(os.path.abspath("."), relative_path)
-        except Exception as e:
+                base_path = Path(sys._MEIPASS)
+            else:
+                base_path = Path(__file__).resolve().parent.parent
+            return str((base_path / relative_path).resolve())
+        except (OSError, RuntimeError, TypeError) as e:
             logger.error(f"Не удалось получить путь к ресурсу: {e}")
             return None
 

@@ -1,4 +1,5 @@
 import os
+import queue
 import threading
 import time
 import webbrowser
@@ -51,7 +52,11 @@ class MainWindow:
         self.bunnyhop_thread = None
         self.noflash_thread = None
         self.observer = None
+        self.config_handler = None
         self.log_timer = None
+        self.log_queue = queue.Queue()
+        self.log_worker = None
+        self.log_stop_event = threading.Event()
 
         # Конфигурация темного интерфейса CustomTkinter
         ctk.set_appearance_mode("dark")
@@ -444,17 +449,23 @@ class MainWindow:
         try:
             self.validate_inputs()
             config = ConfigManager.load_config()
-            old_config = config.copy()
+            old_config = copy.deepcopy(config)
 
             self.update_config_from_ui(config)
-            ConfigManager.save_config(config, log_info=False)
-            
+            if not ConfigManager.save_config(config, log_info=False):
+                raise OSError("Не удалось сохранить конфигурацию на диск.")
+
             self.client_manager.apply_feature_state_changes(old_config, config)
             self.client_manager.update_running_feature_configs(config)
 
             if show_message: messagebox.showinfo("Saved", "Настройки сохранены!")
-        except ValueError as e: messagebox.showerror("Invalid Input", str(e))
-        except Exception: logger.exception("Ошибка сохранения настроек.")
+        except ValueError as e:
+            messagebox.showerror("Invalid Input", str(e))
+        except OSError as e:
+            logger.error("Ошибка сохранения настроек: %s", e)
+            messagebox.showerror("Save Error", str(e))
+        except Exception:
+            logger.exception("Ошибка сохранения настроек.")
 
     def update_config_from_ui(self, config):
         """Собирает значения из всех вкладок интерфейса."""
@@ -532,12 +543,12 @@ class MainWindow:
             self.stop_client()
             new_config = copy.deepcopy(ConfigManager.DEFAULT_CONFIG)
             
-            self.triggerbot.config = new_config
-            self.overlay.config = new_config
-            self.bunnyhop.config = new_config
-            self.noflash.config = new_config
-            
-            ConfigManager.save_config(new_config)
+            if not ConfigManager.save_config(new_config):
+                raise OSError("Не удалось сохранить настройки по умолчанию на диск.")
+            self.triggerbot.config = copy.deepcopy(new_config)
+            self.overlay.config = copy.deepcopy(new_config)
+            self.bunnyhop.config = copy.deepcopy(new_config)
+            self.noflash.config = copy.deepcopy(new_config)
             self.update_ui_from_config()
             messagebox.showinfo("Reset", "Все настройки успешно сброшены!")
         except Exception:
@@ -604,34 +615,49 @@ class MainWindow:
     def init_config_watcher(self):
         """Запускает слежение за изменениями config.json на диске."""
         try:
-            event_handler = ConfigFileChangeHandler(self)
+            self.config_handler = ConfigFileChangeHandler(self)
             self.observer = Observer()
-            self.observer.schedule(event_handler, path=ConfigManager.CONFIG_DIRECTORY, recursive=False)
+            self.observer.schedule(self.config_handler, path=ConfigManager.CONFIG_DIRECTORY, recursive=False)
             self.observer.start()
             logger.info("Слежение за файлом конфигурации успешно запущено.")
         except Exception:
             logger.exception("Ошибка инициализации слежения за конфигурацией.")
 
     def start_log_timer(self):
-        """Запускает цикличный таймер для вывода логов на вкладку софта."""
+        """Читает лог в фоне и обновляет Tk-виджет только из главного потока."""
         def read_log_file():
-            try:
-                log_path = Logger.LOG_FILE()
-                if hasattr(self, 'log_text') and os.path.exists(log_path):
+            while not self.log_stop_event.wait(1.0):
+                try:
+                    log_path = Logger.LOG_FILE()
+                    if not os.path.exists(log_path):
+                        continue
                     size = os.path.getsize(log_path)
                     position = getattr(self, 'last_log_position', 0) or 0
-                    if size < position:  # лог пересоздан/ротирован
+                    if size < position:
                         position = 0
-                    if size > position:
-                        with open(log_path, 'rb') as f:
-                            f.seek(position)
-                            chunk = f.read()
-                        self.last_log_position = size
-                        self.root.after(0, self.append_log_display, chunk.decode('utf-8', errors='replace'))
-            except Exception:
+                    if size <= position:
+                        continue
+                    with open(log_path, 'rb') as f:
+                        f.seek(position)
+                        chunk = f.read()
+                    self.last_log_position = size
+                    self.log_queue.put(chunk.decode('utf-8', errors='replace'))
+                except (OSError, ValueError):
+                    continue
+
+        def flush_log_queue():
+            try:
+                while True:
+                    self.append_log_display(self.log_queue.get_nowait())
+            except queue.Empty:
                 pass
-            self.log_timer = self.root.after(1000, read_log_file)
-        read_log_file()
+            if not self.log_stop_event.is_set():
+                self.log_timer = self.root.after(250, flush_log_queue)
+
+        self.log_stop_event.clear()
+        self.log_worker = threading.Thread(target=read_log_file, daemon=True, name="LogReader")
+        self.log_worker.start()
+        self.log_timer = self.root.after(250, flush_log_queue)
 
     def append_log_display(self, text):
         """Дописывает новые строки лога в текстовое поле (без перечитывания всего файла)."""
@@ -662,11 +688,17 @@ class MainWindow:
         """Очищает занятые потоки и таймеры перед выходом."""
         try:
             self.stop_client()
+            if self.config_handler:
+                self.config_handler.cancel()
             if hasattr(self, 'observer') and self.observer:
                 self.observer.stop()
                 self.observer.join()
             if self.log_timer:
                 self.root.after_cancel(self.log_timer)
+                self.log_timer = None
+            self.log_stop_event.set()
+            if self.log_worker and self.log_worker.is_alive():
+                self.log_worker.join(timeout=1.5)
         except Exception:
             pass
 

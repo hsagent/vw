@@ -1,5 +1,5 @@
 import customtkinter as ctk
-import orjson
+from classes import json_compat as orjson
 import threading
 import requests
 from classes.logger import Logger

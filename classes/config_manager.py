@@ -1,5 +1,5 @@
 import os
-import orjson
+from classes import json_compat as orjson
 import copy
 from pathlib import Path
 from typing import Dict, Any, Optional, Tuple
@@ -16,7 +16,7 @@ class ConfigManager:
     Предоставляет кэширование, миграцию ключей и защиту от сбоев.
     """
     
-    VERSION = "v1.2.9.4"
+    VERSION = "v1.2.9.6"
     
     # ЖЕСТКАЯ ПРИВЯЗКА К СИСТЕМНОЙ ПАПКЕ В APPDATA
     CONFIG_DIRECTORY = os.path.expanduser(r'~\AppData\Local\My Project')
@@ -161,8 +161,11 @@ class ConfigManager:
     @classmethod
     def save_config(cls, config: Dict[str, Any], log_info: bool = True) -> bool:
         with cls._lock:
-            cls._config_cache = copy.deepcopy(config)
-            return cls._save_to_file(config, log_info)
+            config_copy = copy.deepcopy(config)
+            if not cls._save_to_file(config_copy, log_info):
+                return False
+            cls._config_cache = config_copy
+            return True
     
     @classmethod
     def _save_to_file(cls, config: Dict[str, Any], log_info: bool = True) -> bool:
@@ -182,11 +185,12 @@ class ConfigManager:
             return False
     
     @classmethod
-    def reset_to_default(cls) -> Dict[str, Any]:
+    def reset_to_default(cls) -> Optional[Dict[str, Any]]:
         with cls._lock:
             default_copy = copy.deepcopy(cls.DEFAULT_CONFIG)
+            if not cls._save_to_file(default_copy, log_info=True):
+                return None
             cls._config_cache = default_copy
-            cls._save_to_file(default_copy, log_info=True)
             return copy.deepcopy(default_copy)
     
     @classmethod
@@ -222,8 +226,10 @@ class ConfigManager:
                     current[key] = child
                 current = child
             current[keys[-1]] = value
+            if not cls._save_to_file(config, log_info=False):
+                return False
             cls._config_cache = copy.deepcopy(config)
-            return cls._save_to_file(config, log_info=False)
+            return True
 
 # Цветовая палитра HEX для GUI
 COLOR_CHOICES = {

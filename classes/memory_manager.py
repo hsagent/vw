@@ -74,16 +74,38 @@ class MemoryManager:
         return True
 
     def initialize_pymem(self) -> bool:
-        try:
-            self.pm = pymem.Pymem("cs2.exe")
-            logger.debug("Успешно подключено к cs2.exe.")
-            return True
-        except pymem.exception.ProcessNotFound:
-            logger.error("Процесс cs2.exe не найден. Запустите игру перед стартом.")
-            return False
-        except Exception as e:
-            logger.error(f"Ошибка подключения: {e}")
-            return False
+        # OpenProcess может кратковременно вернуть отказ, пока игра грузится,
+        # пока античит инициализируется или пока антивирус проверяет процесс.
+        # Поэтому пробуем несколько раз, а не сдаёмся после первой ошибки.
+        attempts = 3
+        last_error = None
+        for attempt in range(1, attempts + 1):
+            try:
+                self.pm = pymem.Pymem("cs2.exe")
+                logger.debug("Успешно подключено к cs2.exe (попытка %d).", attempt)
+                return True
+            except pymem.exception.ProcessNotFound:
+                logger.error("Процесс cs2.exe не найден. Запустите игру перед стартом.")
+                return False
+            except pymem.exception.CouldNotOpenProcess as e:
+                last_error = e
+                if attempt < attempts:
+                    logger.warning(
+                        "Не удалось открыть cs2.exe (попытка %d/%d): %s. Повтор через 1 с...",
+                        attempt, attempts, e,
+                    )
+                    time.sleep(1.0)
+            except Exception as e:
+                logger.error(f"Ошибка подключения: {e}")
+                return False
+
+        logger.error(
+            "Не удалось открыть процесс cs2.exe (%s). "
+            "Запустите программу от имени администратора, дождитесь полной загрузки игры "
+            "и при необходимости добавьте её в исключения антивируса.",
+            last_error,
+        )
+        return False
 
     def get_client_module(self) -> bool:
         try:

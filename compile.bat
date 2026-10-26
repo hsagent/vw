@@ -82,7 +82,9 @@ echo Starting compilation...
 echo ========================================
 
 :: Build the PyInstaller command
-set "PYINSTALLER_CMD=pyinstaller --noconfirm --onefile --windowed"
+:: Сборка всегда запрашивает права администратора: без них OpenProcess
+:: к cs2.exe (запущенному от админа Steam) вернёт Access Denied.
+set "PYINSTALLER_CMD=pyinstaller --noconfirm --onefile --windowed --uac-admin"
 set "PYINSTALLER_CMD=%PYINSTALLER_CMD% %ICON_PARAM%"
 set "PYINSTALLER_CMD=%PYINSTALLER_CMD% --name "%PROJECT_NAME%""
 set "PYINSTALLER_CMD=%PYINSTALLER_CMD% %VERSION_PARAM%"

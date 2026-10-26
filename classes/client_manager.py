@@ -73,7 +73,13 @@ class ClientManager:
 
         # Инициализируем наш умный MemoryManager (он сам скачает новые оффсеты)
         if not self.memory_manager.initialize():
-            messagebox.showerror("Initialization Error", "Не удалось инициализировать чтение памяти. Проверьте соединение с интернетехническими базами дампера.")
+            messagebox.showerror(
+                "Initialization Error",
+                "Не удалось получить доступ к памяти CS2.\n\n"
+                "Запустите программу от имени администратора, дождитесь полной "
+                "загрузки игры и повторите попытку. Если ошибка повторяется, "
+                "добавьте MyProject в исключения антивируса."
+            )
             return
 
         config = ConfigManager.load_config()
