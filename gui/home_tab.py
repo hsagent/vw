@@ -1,6 +1,6 @@
 import customtkinter as ctk
 import threading
-import orjson
+from classes import json_compat as orjson
 import requests
 import time
 from datetime import datetime

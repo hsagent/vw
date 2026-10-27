@@ -2,7 +2,7 @@ import threading
 import time
 import struct
 import pyMeow as overlay
-from typing import Iterator, Optional, Dict
+from typing import Iterator, Optional, Dict, Any
 
 from classes.config_manager import ConfigManager, Colors
 from classes.memory_manager import MemoryManager, ENTITY_INDEX_MASK
