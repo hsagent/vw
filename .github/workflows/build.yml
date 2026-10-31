@@ -1,6 +1,10 @@
 name: Build and Release
 
 on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
     inputs:
       tag_name:
@@ -14,12 +18,39 @@ on:
         type: boolean
 
 permissions:
-  contents: write
+  contents: read
   actions: read
   id-token: none
 
 jobs:
+  tests:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    env:
+      PYTHONUTF8: "1"
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12.10"
+          cache: pip
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Run unit tests
+        run: python -B -m unittest discover -s tests -t . -v
+
+      - name: Check Python syntax
+        run: python -m compileall -q main.py classes gui src tests
+
   build:
+    if: github.event_name == 'workflow_dispatch'
+    needs: tests
     runs-on: windows-latest
 
     steps:
@@ -34,24 +65,29 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          python -m pip install -r requirements.txt
 
       - name: Install PyInstaller
-        run: pip install pyinstaller
+        run: python -m pip install pyinstaller
 
       - name: Package Application
-        run: |
-          pyinstaller --noconfirm --onefile --windowed --uac-admin --icon "src\img\icon.ico" --name "MyProject" --version-file "version.txt" --add-data "classes;classes/" --add-data "gui;gui/" --add-data "src/img/*;src/img" --add-data "src/fonts/*;src/fonts" --add-data "src/*;src" "main.py"
+        shell: cmd
+        run: compile.bat --ci
 
       - name: Upload Build Artifact
         uses: actions/upload-artifact@v4
         with:
           name: MyProject
-          path: dist/MyProject.exe
+          path: output/MyProject.exe
+          if-no-files-found: error
 
   release:
+    if: github.event_name == 'workflow_dispatch'
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
 
     steps:
       - name: Checkout code
@@ -79,6 +115,9 @@ jobs:
 
           [![Downloads](https://img.shields.io/github/downloads/hsagent/vw/${{ github.event.inputs.tag_name }}/total?style=for-the-badge&logo=github&color=8E44AD)](https://github.com/hsagent/vw/releases/tag/${{ github.event.inputs.tag_name }}) [![Platforms](https://img.shields.io/badge/platform-Windows-blue?style=for-the-badge&color=8E44AD)](https://github.com/hsagent/vw/releases/download/${{ github.event.inputs.tag_name }}/MyProject.exe) [![License](https://img.shields.io/github/license/hsagent/vw?style=for-the-badge&color=8E44AD)](https://github.com/hsagent/vw/blob/main/LICENSE)
           EOF
+          if [ "${{ github.event.inputs.prerelease }}" = "true" ]; then
+            printf '\nPre-release build. Native CS2 overlay smoke testing has not been performed for this build.\n' >> badges.md
+          fi
 
       - name: Create release
         uses: softprops/action-gh-release@v2
@@ -86,6 +125,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: ${{ github.event.inputs.tag_name }}
+          target_commitish: ${{ github.sha }}
           name: My Project - ${{ github.event.inputs.prerelease == 'true' && 'Pre-release' || 'Release' }} ${{ github.event.inputs.tag_name }}
           body_path: ./badges.md
           generate_release_notes: true

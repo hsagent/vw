@@ -53,6 +53,7 @@ venv.bak/
 # IDE settings
 .vscode/
 .idea/
+/.kilo/
 *.swp
 *.swo
 *~
@@ -66,8 +67,7 @@ venv.bak/
 
 # Environment variables
 .env
-.env.local
-.env.*.local
+.env.*
 
 # Database
 *.db
@@ -76,12 +76,22 @@ venv.bak/
 
 # Logs
 *.log
+*.log.*
+*.dmp
+*.mdmp
 logs/
 
 # Project specific
 /gui/__pycache__/
 /classes/__pycache__/
 /output/
+/config.json
+/config.json.*
+/sources.json
+/Offsets/
+/Update/
+/last_update_cache.txt
+/cs2_patch_cache.txt
 
 # mypy
 .mypy_cache/

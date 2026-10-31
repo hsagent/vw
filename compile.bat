@@ -7,6 +7,8 @@ set "MAIN_FILE=main.py"
 set "OUTPUT_DIR=output"
 set "ICON_FILE=src\img\icon.ico"
 set "VERSION_FILE=version.txt"
+set "NON_INTERACTIVE=0"
+if /i "%~1"=="--ci" set "NON_INTERACTIVE=1"
 
 :: Display header
 echo ========================================
@@ -18,23 +20,23 @@ echo.
 python --version >nul 2>&1
 if errorlevel 1 (
     echo ERROR: Python is not installed or not in PATH
-    pause
+    if "%NON_INTERACTIVE%"=="0" pause
     exit /b 1
 )
 
 :: Check if PyInstaller is available
-pyinstaller --version >nul 2>&1
+python -m PyInstaller --version >nul 2>&1
 if errorlevel 1 (
     echo ERROR: PyInstaller is not installed
-    echo Please install it with: pip install pyinstaller
-    pause
+    echo Please install it with: python -m pip install pyinstaller
+    if "%NON_INTERACTIVE%"=="0" pause
     exit /b 1
 )
 
 :: Check if main file exists
 if not exist "%MAIN_FILE%" (
     echo ERROR: Main file '%MAIN_FILE%' not found
-    pause
+    if "%NON_INTERACTIVE%"=="0" pause
     exit /b 1
 )
 
@@ -84,7 +86,7 @@ echo ========================================
 :: Build the PyInstaller command
 :: Сборка всегда запрашивает права администратора: без них OpenProcess
 :: к cs2.exe (запущенному от админа Steam) вернёт Access Denied.
-set "PYINSTALLER_CMD=pyinstaller --noconfirm --onefile --windowed --uac-admin"
+set "PYINSTALLER_CMD=python -m PyInstaller --noconfirm --onefile --windowed --uac-admin"
 set "PYINSTALLER_CMD=%PYINSTALLER_CMD% %ICON_PARAM%"
 set "PYINSTALLER_CMD=%PYINSTALLER_CMD% --name "%PROJECT_NAME%""
 set "PYINSTALLER_CMD=%PYINSTALLER_CMD% %VERSION_PARAM%"
@@ -105,7 +107,7 @@ if errorlevel 1 (
     echo ========================================
     echo ERROR: Compilation failed!
     echo ========================================
-    pause
+    if "%NON_INTERACTIVE%"=="0" pause
     exit /b 1
 )
 
@@ -130,7 +132,7 @@ if exist "%OUTPUT_DIR%\%PROJECT_NAME%.exe" (
     echo ========================================
     echo ERROR: Executable not found in %OUTPUT_DIR%
     echo ========================================
-    pause
+    if "%NON_INTERACTIVE%"=="0" pause
     exit /b 1
 )
 
@@ -147,6 +149,8 @@ echo Build process completed successfully!
 echo ========================================
 echo.
 
+if "%NON_INTERACTIVE%"=="1" exit /b 0
+
 :: Ask if user wants to run the executable
 set /p "RUN_EXE=Do you want to run %PROJECT_NAME%.exe? (y/n): "
 if /i "!RUN_EXE!"=="y" (
@@ -155,3 +159,4 @@ if /i "!RUN_EXE!"=="y" (
 )
 
 pause
+exit /b 0
