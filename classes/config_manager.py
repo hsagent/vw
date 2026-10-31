@@ -16,7 +16,7 @@ class ConfigManager:
     Предоставляет кэширование, миграцию ключей и защиту от сбоев.
     """
     
-    VERSION = "v1.2.9.6"
+    VERSION = "v1.2.9.7-rc.1"
     
     # ЖЕСТКАЯ ПРИВЯЗКА К СИСТЕМНОЙ ПАПКЕ В APPDATA
     CONFIG_DIRECTORY = os.path.expanduser(r'~\AppData\Local\My Project')
