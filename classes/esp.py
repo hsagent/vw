@@ -5,7 +5,7 @@ import pyMeow as overlay
 from typing import Iterator, Optional, Dict, Any
 
 from classes.config_manager import ConfigManager, Colors
-from classes.memory_manager import MemoryManager, ENTITY_INDEX_MASK
+from classes.memory_manager import MemoryManager
 from classes.logger import Logger
 from classes.utility import Utility
 
@@ -15,10 +15,7 @@ logger = Logger.get_logger(__name__)
 # Сон основного цикла для снижения нагрузки на CPU
 MAIN_LOOP_SLEEP = 0.01
 
-# АКТУАЛЬНО ДЛЯ CS2: размер записи entity list на текущей сборке — 112 байт (0x70).
-# Реально используемый размер определяется в MemoryManager.detect_entity_entry_size().
 ENTITY_COUNT = 64
-ENTITY_ENTRY_SIZE = 112
 
 # Максимальный индекс, до которого раз в 5 секунд ищем контроллеры игроков
 DISCOVERY_MAX_INDEX = 512
@@ -94,7 +91,7 @@ class Entity:
                 controller_health = self.memory_manager.read_int(
                     self.controller_ptr + self.memory_manager.m_iPawnHealth
                 )
-                controller_alive = self.memory_manager.read_int(
+                controller_alive = self.memory_manager.read_uint8(
                     self.controller_ptr + self.memory_manager.m_bPawnIsAlive
                 )
                 if controller_alive & 0xFF and 0 < controller_health <= 100:
@@ -112,9 +109,15 @@ class Entity:
             # (на практике это 1-2 человека из каждой команды).
             self.dormant = False
             if game_scene:
-                self.dormant = bool(self.memory_manager.read_int(game_scene + self.memory_manager.m_bDormant))
+                self.dormant = bool(
+                    self.memory_manager.read_uint8(
+                        game_scene + self.memory_manager.m_bDormant
+                    )
+                )
 
-            self.team = self.memory_manager.read_int(self.pawn_ptr + self.memory_manager.m_iTeamNum)
+            self.team = self.memory_manager.read_uint8(
+                self.pawn_ptr + self.memory_manager.m_iTeamNum
+            )
             self.pos = self.memory_manager.read_vec3(self.pawn_ptr + self.memory_manager.m_vOldOrigin)
             if not (self.pos["x"] or self.pos["y"] or self.pos["z"]):
                 return False
@@ -270,10 +273,11 @@ class CS2Overlay:
                 pawn_handle = self.memory_manager.read_int(
                     controller_ptr + self.memory_manager.m_hPlayerPawn
                 )
-                if not pawn_handle:
+                pawn_index = self.memory_manager.handle_to_index(pawn_handle)
+                if pawn_index is None:
                     continue
 
-                pawn_ptr = self.memory_manager.get_entity(pawn_handle & ENTITY_INDEX_MASK)
+                pawn_ptr = self.memory_manager.get_entity(pawn_index)
                 if not pawn_ptr:
                     continue
 
@@ -294,12 +298,15 @@ class CS2Overlay:
                 pawn_handle = self.memory_manager.read_int(
                     controller_ptr + self.memory_manager.m_hPlayerPawn
                 )
-                if not pawn_handle:
+                pawn_index = self.memory_manager.handle_to_index(pawn_handle)
+                if pawn_index is None:
                     continue
-                pawn_ptr = self.memory_manager.get_entity(pawn_handle & ENTITY_INDEX_MASK)
+                pawn_ptr = self.memory_manager.get_entity(pawn_index)
                 if not pawn_ptr:
                     continue
-                team = self.memory_manager.read_int(pawn_ptr + self.memory_manager.m_iTeamNum)
+                team = self.memory_manager.read_uint8(
+                    pawn_ptr + self.memory_manager.m_iTeamNum
+                )
                 health = self.memory_manager.read_int(pawn_ptr + self.memory_manager.m_iHealth)
                 if team in (2, 3) and 0 < health <= 100:
                     found.add(i)
@@ -479,7 +486,9 @@ class CS2Overlay:
                             self.memory_manager.client_base + self.memory_manager.dwLocalPlayerPawn
                         )
                         self.local_team = (
-                            self.memory_manager.read_int(local_pawn + self.memory_manager.m_iTeamNum)
+                            self.memory_manager.read_uint8(
+                                local_pawn + self.memory_manager.m_iTeamNum
+                            )
                             if local_pawn else None
                         )
                     else:
@@ -494,8 +503,8 @@ class CS2Overlay:
 
                     entities = list(self.iterate_entities(local_controller))
 
-                    # Если в матче вдруг не нашлось ни одного игрока — возможно,
-                    # сменился размер записи entity list (112/120 байт).
+                    # Если игроки не найдены, повторно подтверждаем размер записи
+                    # entity list: он меняется между сборками CS2.
                     if do_discovery and not entities and local_pawn:
                         old_size = self.memory_manager.entity_entry_size
                         self.memory_manager.detect_entity_entry_size()

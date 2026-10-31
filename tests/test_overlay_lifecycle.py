@@ -46,6 +46,25 @@ class OverlayLifecycleTests(unittest.TestCase):
     def test_constructor_does_not_call_native_overlay(self):
         self.assertEqual(self.native.mock_calls, [])
 
+    def test_entity_reads_uint8_team_from_schema_field(self):
+        memory = Mock(
+            m_iHealth=0x34C,
+            m_iTeamNum=0x3E7,
+            m_vOldOrigin=0x14A4,
+            m_pGameSceneNode=0x330,
+            m_iszPlayerName=0x6FC,
+        )
+        memory.read_int.return_value = 100
+        memory.read_uint8.return_value = 3
+        memory.read_longlong.return_value = 0
+        memory.read_vec3.return_value = {"x": 1.0, "y": 2.0, "z": 3.0}
+        memory.read_string.return_value = "Enemy"
+        entity = esp.Entity(0x100000, 0x200000, memory)
+
+        self.assertTrue(entity.update(use_transliteration=False, skeleton_enabled=False))
+        self.assertEqual(entity.team, 3)
+        memory.read_uint8.assert_called_once_with(0x200000 + 0x3E7)
+
     def test_stop_before_worker_entry_is_not_cleared(self):
         self.instance.stop()
         self.instance.start()

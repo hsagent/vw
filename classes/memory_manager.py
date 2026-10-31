@@ -14,6 +14,9 @@ logger = Logger.get_logger(__name__)
 ENTITY_INDEX_MASK = 0x7FFF  # Маска для извлечения индекса из handle
 ENTITY_CHUNK_SHIFT = 9  # Сдвиг для вычисления chunk index
 ENTITY_CHUNK_SIZE = 0x1FF  # Размер chunk для entity list
+ENTITY_IDENTITY_HANDLE_OFFSET = 0x10
+ENTITY_ENTRY_MIN_SIZE = 0x70
+ENTITY_ENTRY_MAX_SIZE = 0x100
 ENTITY_LIST_READ_ATTEMPTS = 5
 ENTITY_LIST_READ_DELAY = 0.25
 
@@ -35,6 +38,7 @@ class MemoryManager:
         self.m_iszPlayerName = None
         self.m_vOldOrigin = None
         self.m_pGameSceneNode = None
+        self.m_pEntity = None
         self.m_bDormant = None
         self.m_hPlayerPawn = None
         self.m_flFlashDuration = None
@@ -47,10 +51,14 @@ class MemoryManager:
         self.m_nSubclassID = None
         self.m_szName = None
         self.m_fFlags = None
-        # Размер одной записи entity list зависит от сборки CS2: 0x70 (112) на
-        # текущей, 0x78 (120) на более старых. Определяется автоматически.
+        # Размер записи entity list зависит от сборки и подтверждается по
+        # живым controller -> pawn связям перед использованием.
         self.entity_entry_size = 112
         self._stride_detected = False
+        self._entity_chunks = {}
+        self._layout_anchor_signature = (0, 0)
+        self.local_controller_index = None
+        self.local_pawn_index = None
         # Указатель на entity list меняется при смене карты — обновляем его
         # периодически, иначе ESP/триггер «умирают» после смены уровня.
         self._ent_list_ts = 0.0
@@ -58,7 +66,10 @@ class MemoryManager:
         self._weapon_cache = {"name": "", "type": "", "timestamp": 0.0}
         self._weapon_cache_ttl = 0.5  # Время жизни кэша в секундах
         self._connection_lock = threading.Lock()
+        self._layout_lock = threading.RLock()
+        self._layout_generation = 0
         self._last_entity_list_error = None
+        self._last_stride_failure_log = 0.0
 
     def initialize(self) -> bool:
         with self._connection_lock:
@@ -111,7 +122,6 @@ class MemoryManager:
         self._ent_list_ts = time.monotonic()
         if not self._stride_detected:
             self.detect_entity_entry_size()
-            self._stride_detected = True
         return True
 
     def initialize_pymem(self) -> bool:
@@ -153,13 +163,29 @@ class MemoryManager:
 
     def _close_process_locked(self) -> None:
         """Закрывает текущий handle pymem и сбрасывает зависящие указатели."""
-        pm = self.pm
-        self.pm = None
-        self.client_base = None
-        self.ent_list = None
-        self._ent_list_ts = 0.0
-        self._stride_detected = False
-        self._last_entity_list_error = None
+        with self._layout_lock:
+            pm = self.pm
+            layout_was_active = bool(
+                self.pm
+                or self.client_base
+                or self.ent_list
+                or self._entity_chunks
+                or self._stride_detected
+                or self._layout_anchor_signature != (0, 0)
+            )
+            self.pm = None
+            self.client_base = None
+            self.ent_list = None
+            self._ent_list_ts = 0.0
+            self._entity_chunks = {}
+            self._stride_detected = False
+            self._layout_anchor_signature = (0, 0)
+            self.local_controller_index = None
+            self.local_pawn_index = None
+            if layout_was_active:
+                self._layout_generation += 1
+            self._last_entity_list_error = None
+            self._last_stride_failure_log = 0.0
         if pm is None:
             return
         try:
@@ -223,6 +249,7 @@ class MemoryManager:
         self.m_iszPlayerName = updater.get_netvar("CBasePlayerController", "m_iszPlayerName") or 0x6FC
         self.m_hPlayerPawn = updater.get_netvar("CCSPlayerController", "m_hPlayerPawn") or 0x92C
         self.m_pGameSceneNode = updater.get_netvar("C_BaseEntity", "m_pGameSceneNode") or 0x330
+        self.m_pEntity = updater.get_netvar("CEntityInstance", "m_pEntity") or 0x10
         self.m_bDormant = updater.get_netvar("CGameSceneNode", "m_bDormant") or 0x103
         self.m_pBoneArray = (updater.get_netvar("CSkeletonInstance", "m_modelState") or 0x140) + 0x80
 
@@ -259,39 +286,224 @@ class MemoryManager:
                 time.sleep(ENTITY_LIST_READ_DELAY)
         return 0
 
-    def _ensure_ent_list(self) -> None:
+    def _ensure_ent_list(self, detect_stride: bool = True) -> None:
         """Обновляет указатель entity list не чаще раза в 2 секунды."""
+        with self._layout_lock:
+            self._ensure_ent_list_locked(detect_stride)
+
+    def _ensure_ent_list_locked(self, detect_stride: bool = True) -> None:
         now = time.monotonic()
         if not self.ent_list or now - self._ent_list_ts > 2.0:
             previous_pointer = self.ent_list
-            self.ent_list = self.read_longlong(
+            current_pointer = self.read_longlong(
                 self.client_base + self.dwEntityList
             )
+            local_signature = (
+                self.read_longlong(
+                    self.client_base + self.dwLocalPlayerController
+                ) if self.dwLocalPlayerController else 0,
+                self.read_longlong(
+                    self.client_base + self.dwLocalPlayerPawn
+                ) if self.dwLocalPlayerPawn else 0,
+            )
+            self.ent_list = current_pointer
             self._ent_list_ts = now
-            if self.ent_list and not previous_pointer and not self._stride_detected:
+            if (
+                current_pointer != previous_pointer
+                or local_signature != self._layout_anchor_signature
+            ):
+                self._entity_chunks = {}
+                self._stride_detected = False
+                self.local_controller_index = None
+                self.local_pawn_index = None
+                self._layout_anchor_signature = local_signature
+                self._layout_generation += 1
+            if detect_stride and self.ent_list and not self._stride_detected:
                 self.detect_entity_entry_size()
-                self._stride_detected = True
 
     def _read_entity_raw(self, index: int, entry_size: int) -> int:
         """Чтение указателя сущности с явно заданным размером записи."""
-        chunk = self.read_longlong(self.ent_list + 8 * ((index & ENTITY_INDEX_MASK) >> ENTITY_CHUNK_SHIFT) + 0x10)
+        chunk_index = (index & ENTITY_INDEX_MASK) >> ENTITY_CHUNK_SHIFT
+        chunk = self._entity_chunks.get(chunk_index)
+        if not chunk:
+            if self._stride_detected and self._entity_chunks:
+                return 0
+            chunk = self.read_longlong(
+                self.ent_list + 8 * chunk_index + 0x10
+            )
         if not chunk:
             return 0
         return self.read_longlong(chunk + entry_size * (index & ENTITY_CHUNK_SIZE))
 
-    def detect_entity_entry_size(self) -> int:
-        """Определяет размер записи entity list (112 или 120) по живым игрокам.
+    def _read_identity_anchor(self, entity: int):
+        if not entity or not self.m_pEntity:
+            return None
+        identity = self.read_longlong(entity + self.m_pEntity)
+        if not identity or self.read_longlong(identity) != entity:
+            return None
+        index = self.handle_to_index(
+            self.read_int(identity + ENTITY_IDENTITY_HANDLE_OFFSET)
+        )
+        if index is None:
+            return None
+        return {
+            "entity": entity,
+            "identity": identity,
+            "index": index,
+            "chunk_index": index >> ENTITY_CHUNK_SHIFT,
+            "slot": index & ENTITY_CHUNK_SIZE,
+        }
 
-        В разных сборках CS2 структура записи отличается (0x70 / 0x78). При
-        неверном размере чтение попадает в середину соседней записи и ESP
-        находит только часть игроков или не находит никого.
+    def _identity_anchor_matches(
+        self,
+        anchor: dict,
+        entry_size: int,
+        chunk: int,
+    ) -> bool:
+        return (
+            anchor["identity"] == chunk + anchor["slot"] * entry_size
+            and self.read_longlong(anchor["entity"] + self.m_pEntity)
+            == anchor["identity"]
+            and self.read_longlong(anchor["identity"])
+            == anchor["entity"]
+            and self.handle_to_index(
+                self.read_int(
+                    anchor["identity"] + ENTITY_IDENTITY_HANDLE_OFFSET
+                )
+            )
+            == anchor["index"]
+        )
+
+    def _detect_layout_from_local_identities(
+        self,
+        local_controller: int,
+        local_pawn: int,
+        expected_generation: int,
+    ) -> bool:
+        anchors = [
+            anchor
+            for anchor in (
+                self._read_identity_anchor(local_controller),
+                self._read_identity_anchor(local_pawn),
+            )
+            if anchor is not None
+        ]
+        anchors.sort(key=lambda anchor: (anchor["chunk_index"], anchor["slot"]))
+        candidates = {}
+        for first_index, first in enumerate(anchors):
+            for second in anchors[first_index + 1:]:
+                if first["chunk_index"] != second["chunk_index"]:
+                    continue
+                slot_delta = second["slot"] - first["slot"]
+                identity_delta = second["identity"] - first["identity"]
+                if not slot_delta or identity_delta % slot_delta:
+                    continue
+                entry_size = identity_delta // slot_delta
+                if not (
+                    ENTITY_ENTRY_MIN_SIZE <= entry_size <= ENTITY_ENTRY_MAX_SIZE
+                    and entry_size % 8 == 0
+                ):
+                    continue
+                chunk = first["identity"] - first["slot"] * entry_size
+                if all(
+                    self._identity_anchor_matches(anchor, entry_size, chunk)
+                    for anchor in anchors
+                    if anchor["chunk_index"] == first["chunk_index"]
+                ):
+                    candidates[entry_size] = (first["chunk_index"], chunk)
+
+        if len(candidates) != 1:
+            return False
+
+        entry_size, _ = next(iter(candidates.items()))
+        if self._layout_generation != expected_generation:
+            return False
+        if self.dwLocalPlayerController and self.read_longlong(
+            self.client_base + self.dwLocalPlayerController
+        ) != local_controller:
+            return False
+        if self.dwLocalPlayerPawn and self.read_longlong(
+            self.client_base + self.dwLocalPlayerPawn
+        ) != local_pawn:
+            return False
+
+        validated_chunks = {}
+        for anchor in anchors:
+            anchor_chunk = anchor["identity"] - anchor["slot"] * entry_size
+            if not self._identity_anchor_matches(
+                anchor,
+                entry_size,
+                anchor_chunk,
+            ):
+                return False
+            validated_chunks[anchor["chunk_index"]] = anchor_chunk
+
+        previous_size = self.entity_entry_size
+        self.entity_entry_size = entry_size
+        self._entity_chunks = {**self._entity_chunks, **validated_chunks}
+        self._layout_anchor_signature = (local_controller, local_pawn)
+        self.local_controller_index = None
+        self.local_pawn_index = None
+        for anchor in anchors:
+            if anchor["entity"] == local_controller:
+                self.local_controller_index = anchor["index"]
+            if anchor["entity"] == local_pawn:
+                self.local_pawn_index = anchor["index"]
+        self._layout_generation += 1
+        self._stride_detected = True
+
+        logger.info(
+            "[Memory] Entity layout подтверждён по local identities: "
+            "stride=%d controller_index=%s pawn_index=%s chunks=%s (был %d)",
+            entry_size,
+            self.local_controller_index,
+            self.local_pawn_index,
+            {key: hex(value) for key, value in self._entity_chunks.items()},
+            previous_size,
+        )
+        return True
+
+    def detect_entity_entry_size(self) -> int:
+        with self._layout_lock:
+            return self._detect_entity_entry_size_locked()
+
+    def _detect_entity_entry_size_locked(self) -> int:
+        """Определяет размер записи entity list по живым игрокам.
+
+        В разных сборках CS2 структура записи отличается. При неверном размере
+        чтение попадает в середину соседней записи и ESP/Trigger не находят
+        игровые сущности.
         """
         best_size = self.entity_entry_size
         best_score = -1
-        self._ensure_ent_list()
+        scores = {}
+        self._ensure_ent_list(detect_stride=False)
+        if not self.ent_list:
+            self._stride_detected = False
+            return self.entity_entry_size
+        expected_generation = self._layout_generation
 
-        # Порог для досрочной остановки - если найдено достаточно игроков
-        EARLY_EXIT_THRESHOLD = 5
+        local_controller = 0
+        local_pawn = 0
+        if self.client_base and self.dwLocalPlayerController:
+            local_controller = self.read_longlong(
+                self.client_base + self.dwLocalPlayerController
+            )
+        if self.client_base and self.dwLocalPlayerPawn:
+            local_pawn = self.read_longlong(
+                self.client_base + self.dwLocalPlayerPawn
+            )
+
+        if self._detect_layout_from_local_identities(
+            local_controller,
+            local_pawn,
+            expected_generation,
+        ):
+            return self.entity_entry_size
+
+        if self._entity_chunks:
+            self._stride_detected = True
+            return self.entity_entry_size
 
         for entry_size in (112, 120, 128):
             score = 0
@@ -300,47 +512,71 @@ class MemoryManager:
                     controller = self._read_entity_raw(index, entry_size)
                     if not controller:
                         continue
-                    name = self.read_string(controller + self.m_iszPlayerName, 24)
-                    if not name or not name.isprintable():
-                        continue
                     handle = self.read_int(controller + self.m_hPlayerPawn)
-                    if not handle:
+                    pawn_index = self.handle_to_index(handle)
+                    if pawn_index is None:
                         continue
-                    pawn = self._read_entity_raw(handle & ENTITY_INDEX_MASK, entry_size)
+                    pawn = self._read_entity_raw(pawn_index, entry_size)
                     if not pawn:
                         continue
                     if (
-                        self.read_int(pawn + self.m_iTeamNum) in (2, 3)
+                        self.read_uint8(pawn + self.m_iTeamNum) in (2, 3)
                         and 0 < self.read_int(pawn + self.m_iHealth) <= 100
                     ):
                         score += 1
-                        # Досрочный выход если нашли достаточно игроков
-                        if score >= EARLY_EXIT_THRESHOLD:
-                            break
+                        if local_controller and controller == local_controller:
+                            score += 2
+                        if local_pawn and pawn == local_pawn:
+                            score += 2
                 except Exception:
                     continue
+            scores[entry_size] = score
             if score > best_score:
                 best_size, best_score = entry_size, score
-                # Если нашли достаточно игроков, не проверяем остальные размеры
-                if best_score >= EARLY_EXIT_THRESHOLD:
-                    break
 
-        if best_score > 0:
-            if best_size != self.entity_entry_size:
-                logger.info(
-                    f"[Memory] Размер записи entity list: {best_size} "
-                    f"(был {self.entity_entry_size}, найдено игроков: {best_score})"
-                )
+        winners = [size for size, score in scores.items() if score == best_score]
+        if best_score > 0 and len(winners) == 1:
+            was_detected = self._stride_detected
+            previous_size = self.entity_entry_size
             self.entity_entry_size = best_size
+            self._layout_generation += 1
+            self._stride_detected = True
+            if best_size != previous_size or not was_detected:
+                logger.info(
+                    "[Memory] Размер записи entity list: %d "
+                    "(был %d, найдено игроков: %d, оценки: %s)",
+                    best_size,
+                    previous_size,
+                    best_score,
+                    scores,
+                )
+        else:
+            self._stride_detected = False
+            now = time.monotonic()
+            if now - self._last_stride_failure_log >= 5.0:
+                self._last_stride_failure_log = now
+                logger.debug(
+                    "[Memory] Размер записи entity list пока не подтверждён: %s",
+                    scores,
+                )
         return self.entity_entry_size
+
+    @staticmethod
+    def handle_to_index(handle: int):
+        """Возвращает индекс CHandle, сохраняя signed serial-биты."""
+        raw_handle = handle & 0xFFFFFFFF
+        if raw_handle in (0, 0xFFFFFFFF):
+            return None
+        return raw_handle & ENTITY_INDEX_MASK
 
     def get_entity(self, index: int):
         """Возвращает указатель сущности по её индексу (chunked entity list CS2)."""
         try:
-            self._ensure_ent_list()
-            if not self.ent_list:
-                return None
-            return self._read_entity_raw(index, self.entity_entry_size)
+            with self._layout_lock:
+                self._ensure_ent_list_locked()
+                if not self.ent_list:
+                    return None
+                return self._read_entity_raw(index, self.entity_entry_size)
         except Exception:
             return None
 
@@ -369,9 +605,10 @@ class MemoryManager:
             # у пешки m_hPlayerPawn == 0, поэтому fallback безопасен.
             if not (0 < entity_health <= 100):
                 pawn_handle = self.read_int(entity_pawn + self.m_hPlayerPawn)
-                if not pawn_handle:
+                pawn_index = self.handle_to_index(pawn_handle)
+                if pawn_index is None:
                     return None
-                entity_pawn = self.get_entity(pawn_handle & ENTITY_INDEX_MASK)
+                entity_pawn = self.get_entity(pawn_index)
                 if not entity_pawn:
                     return None
                 entity_health = self.read_int(entity_pawn + self.m_iHealth)
@@ -381,8 +618,8 @@ class MemoryManager:
 
             return {
                 "entity_index": entity_id,
-                "entity_team": self.read_int(entity_pawn + self.m_iTeamNum),
-                "player_team": self.read_int(player + self.m_iTeamNum),
+                "entity_team": self.read_uint8(entity_pawn + self.m_iTeamNum),
+                "player_team": self.read_uint8(player + self.m_iTeamNum),
                 "entity_health": entity_health,
                 "weapon_type": self.get_weapon_type(),
             }
@@ -414,9 +651,10 @@ class MemoryManager:
             if not services:
                 return ""
             handle = self.read_int(services + self.m_hActiveWeapon)
-            if not handle or handle == 0xFFFFFFFF:
+            weapon_index = self.handle_to_index(handle)
+            if weapon_index is None:
                 return ""
-            weapon = self.get_entity(handle & ENTITY_INDEX_MASK)
+            weapon = self.get_entity(weapon_index)
             if not weapon:
                 return ""
             vdata = self.read_longlong(weapon + self.m_nSubclassID + 8)
@@ -515,6 +753,14 @@ class MemoryManager:
             return 0
         try:
             return self.pm.read_int(address)
+        except Exception:
+            return 0
+
+    def read_uint8(self, address: int) -> int:
+        if not self.pm:
+            return 0
+        try:
+            return self.pm.read_bytes(address, 1)[0]
         except Exception:
             return 0
 
