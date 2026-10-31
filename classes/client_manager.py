@@ -13,8 +13,37 @@ class ClientManager:
         self.memory_manager = main_window.memory_manager
         self.features = main_window.features
 
+    def _any_feature_running(self):
+        for feature_data in self.features.values():
+            if getattr(feature_data["instance"], "is_running", False):
+                return True
+            thread = getattr(
+                self.main_window,
+                f'{feature_data["name"].lower()}_thread',
+                None,
+            )
+            if thread and thread.is_alive():
+                return True
+        return False
+
+    def _initialize_memory_if_needed(self):
+        if self._any_feature_running() and self.memory_manager.pm is not None:
+            return True
+        return self.memory_manager.initialize()
+
     def _start_feature(self, feature_name, feature_obj, config):
         """Вспомогательный метод для безопасного запуска отдельной функции в потоке."""
+        thread_attr = f'{feature_name.lower()}_thread'
+        existing_thread = getattr(self.main_window, thread_attr, None)
+        if existing_thread and existing_thread.is_alive():
+            logger.warning(
+                "[Client] Поток %s уже работает или ещё завершается; повторный запуск отменён.",
+                feature_name,
+            )
+            return False
+        if existing_thread is not None:
+            setattr(self.main_window, thread_attr, None)
+
         if not getattr(feature_obj, 'is_running', False):
             try:
                 # КРИТИЧЕСКИ ВАЖНО ДЛЯ CS2: Сбрасываем эвент остановки перед стартом цикла
@@ -30,11 +59,13 @@ class ClientManager:
                     feature_obj.config = config
                 feature_obj.is_running = True
                 
-                # Создаем и запускаем демон-поток для логики чита
-                thread = threading.Thread(target=feature_obj.start, daemon=True)
+                thread = threading.Thread(
+                    target=feature_obj.start,
+                    daemon=True,
+                    name=f"{feature_name}Worker",
+                )
+                setattr(self.main_window, thread_attr, thread)
                 thread.start()
-                
-                setattr(self.main_window, f'{feature_name.lower()}_thread', thread)
                 logger.info(f"[Client] Функция {feature_name} успешно запущена.")
                 return True
             except Exception:
@@ -44,27 +75,36 @@ class ClientManager:
         return False
 
     def _stop_feature(self, feature_name, feature_obj):
-        """Вспомогательный метод для корректной остановки и очистки потока."""
-        if feature_obj and getattr(feature_obj, 'is_running', False):
-            try:
-                feature_obj.stop()
-                thread = getattr(self.main_window, f'{feature_name.lower()}_thread', None)
-                
-                # Даем потоку время на завершение операций чтения памяти игры
-                if thread and thread.is_alive():
-                    thread.join(timeout=1.5)
-                    if thread.is_alive():
-                        logger.warning(f"[Client] Поток {feature_name} не завершился вовремя.")
-                    else:
-                        logger.info(f"[Client] Поток {feature_name} успешно остановлен.")
-                
-                setattr(self.main_window, f'{feature_name.lower()}_thread', None)
-                feature_obj.is_running = False
-                return True
-            except Exception:
-                logger.exception(f"Ошибка при плановой остановке функции: {feature_name}")
-                feature_obj.is_running = False
-        return False
+        """Останавливает функцию, сохраняя ссылку на ещё живой поток."""
+        thread_attr = f'{feature_name.lower()}_thread'
+        thread = getattr(self.main_window, thread_attr, None)
+        if not feature_obj:
+            return False
+        if not getattr(feature_obj, 'is_running', False) and not (
+            thread and thread.is_alive()
+        ):
+            if thread is not None:
+                setattr(self.main_window, thread_attr, None)
+            return False
+
+        try:
+            feature_obj.stop()
+            if thread and thread.is_alive():
+                thread.join(timeout=1.5)
+                if thread.is_alive():
+                    logger.warning(
+                        "[Client] Поток %s не завершился вовремя; ссылка сохранена.",
+                        feature_name,
+                    )
+                    return False
+
+            setattr(self.main_window, thread_attr, None)
+            feature_obj.is_running = False
+            logger.info(f"[Client] Поток {feature_name} успешно остановлен.")
+            return True
+        except Exception:
+            logger.exception(f"Ошибка при плановой остановке функции: {feature_name}")
+            return False
     def start_client(self):
         """Запуск всех выбранных функций на основе настроек General."""
         if not Utility.is_game_running():
@@ -72,50 +112,90 @@ class ClientManager:
             return
 
         # Инициализируем наш умный MemoryManager (он сам скачает новые оффсеты)
-        if not self.memory_manager.initialize():
-            messagebox.showerror(
-                "Initialization Error",
-                "Не удалось получить доступ к памяти CS2.\n\n"
-                "Запустите программу от имени администратора, дождитесь полной "
-                "загрузки игры и повторите попытку. Если ошибка повторяется, "
-                "добавьте MyProject в исключения антивируса."
+        config = ConfigManager.load_config()
+        enabled_features = [
+            feature_data
+            for config_key, feature_data in self.features.items()
+            if config.get("General", {}).get(config_key, False)
+        ]
+        if not enabled_features:
+            self.stop_client()
+            logger.warning("Ни одна функция не выбрана в General.")
+            messagebox.showwarning(
+                "No Features Enabled",
+                "Пожалуйста, включите хотя бы одну функцию во вкладке General Settings.",
             )
             return
 
-        config = ConfigManager.load_config()
+        if not self._initialize_memory_if_needed():
+            messagebox.showerror(
+                "Initialization Error",
+                "Не удалось получить доступ к памяти CS2 или загрузить выбранные offsets.\n\n"
+                "Проверьте источник offsets и локальные JSON-файлы, запустите программу "
+                "от имени администратора и дождитесь полной загрузки игры."
+            )
+            return
+
         any_feature_started = False
 
-        for config_key, feature_data in self.features.items():
-            # Проверяем, включен ли тумблер (Triggerbot, ESP, Bunnyhop) в GUI
-            if config.get("General", {}).get(config_key, False):
-                feature_name = feature_data["name"]
-                feature_obj = feature_data["instance"]
-                
-                if not getattr(feature_obj, 'is_running', False):
-                    if self._start_feature(feature_name, feature_obj, config):
-                        any_feature_started = True
-                else:
-                    logger.info(f"{feature_name} уже активен.")
+        for feature_data in enabled_features:
+            feature_name = feature_data["name"]
+            feature_obj = feature_data["instance"]
+            thread = getattr(
+                self.main_window,
+                f'{feature_name.lower()}_thread',
+                None,
+            )
+
+            if thread and thread.is_alive():
+                logger.info(f"{feature_name} уже активен или завершается.")
+                any_feature_started = True
+            elif not getattr(feature_obj, 'is_running', False):
+                if self._start_feature(feature_name, feature_obj, config):
                     any_feature_started = True
+            else:
+                logger.info(f"{feature_name} уже активен.")
+                any_feature_started = True
 
         if any_feature_started:
             self.main_window.update_client_status("Active", "#22c55e")
         else:
-            logger.warning("Ни одна функция не выбрана в General.")
-            messagebox.showwarning("No Features Enabled", "Пожалуйста, включите хотя бы одну функцию во вкладке General Settings.")
+            self.stop_client()
+            logger.error("Не удалось запустить ни одной выбранной функции.")
+            messagebox.showerror(
+                "Feature Start Error",
+                "Не удалось запустить выбранные функции. Проверьте журнал приложения.",
+            )
 
     def stop_client(self):
         """Полная остановка работы софта и выгрузка всех потоков."""
         features_stopped = False
+        unfinished = []
 
         for feature_data in self.features.values():
             if self._stop_feature(feature_data["name"], feature_data["instance"]):
                 features_stopped = True
+            thread = getattr(
+                self.main_window,
+                f'{feature_data["name"].lower()}_thread',
+                None,
+            )
+            if thread and thread.is_alive():
+                unfinished.append(feature_data["name"])
 
+        if unfinished:
+            logger.warning(
+                "[Client] Не завершились потоки: %s",
+                ", ".join(unfinished),
+            )
+            return False
+
+        self.memory_manager.close()
         if features_stopped:
             self.main_window.update_client_status("Inactive", "#ef4444")
         else:
             logger.debug("Активные функции для остановки отсутствуют.")
+        return True
 
     def apply_feature_state_changes(self, old_config, new_config):
         """Включение или выключение функций «на лету» при кликах в GUI."""
@@ -124,21 +204,38 @@ class ClientManager:
         for key, feature_data in self.features.items():
             old_enabled = old_config["General"].get(key, False)
             new_enabled = new_config["General"].get(key, False)
-            is_running = getattr(feature_data["instance"], 'is_running', False)
+            instance = feature_data["instance"]
+            thread = getattr(
+                self.main_window,
+                f'{feature_data["name"].lower()}_thread',
+                None,
+            )
+            is_running = getattr(instance, 'is_running', False) or bool(
+                thread and thread.is_alive()
+            )
 
             if old_enabled == new_enabled:
                 continue
 
-            if new_enabled and not is_running:
+            if new_enabled:
+                if is_running:
+                    logger.warning(
+                        "[Client] %s ещё работает или завершается; повторный запуск отменён.",
+                        feature_data["name"],
+                    )
+                    continue
                 if game_running:
-                    if self.memory_manager.initialize():
-                        self._start_feature(feature_data["name"], feature_data["instance"], new_config)
+                    if self._initialize_memory_if_needed():
+                        self._start_feature(feature_data["name"], instance, new_config)
                     else:
                         logger.error(f"Не удалось инициализировать память для активации: {feature_data['name']}")
                 else:
                     logger.warning(f"Невозможно запустить {feature_data['name']}: Игра закрыта.")
-            elif not new_enabled and is_running:
-                self._stop_feature(feature_data["name"], feature_data["instance"])
+            elif is_running:
+                self._stop_feature(feature_data["name"], instance)
+
+        if not self._any_feature_running():
+            self.memory_manager.close()
 
     def update_running_feature_configs(self, new_config):
         """Обновление параметров внутри работающих потоков (например, изменение задержки триггера)."""

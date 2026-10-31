@@ -1,9 +1,10 @@
 import customtkinter as ctk
+import json
 import os
-import threading
 from pathlib import Path
 from tkinter import filedialog, messagebox
 from classes.config_manager import ConfigManager
+from src.offsets import updater
 from gui.theme import (
     FONT_TITLE, FONT_SUBTITLE, FONT_SECTION_TITLE, FONT_SECTION_DESCRIPTION,
     FONT_ITEM_LABEL, FONT_ITEM_DESCRIPTION, FONT_WIDGET,
@@ -26,6 +27,51 @@ OFFSET_FILES = [
     ("Buttons File", "buttons.json", "Select buttons.json file", "ButtonsFile")
 ]
 
+
+def _validate_selected_offset_file(file_path, config_key):
+    """Проверяет выбранный JSON до сохранения пути в конфигурации."""
+    try:
+        with open(file_path, "r", encoding="utf-8-sig") as file:
+            payload = json.load(file)
+
+        if config_key == "OffsetsFile":
+            offsets_data = payload.get("client.dll", {}) if isinstance(payload, dict) else {}
+            required = {
+                "dwEntityList",
+                "dwLocalPlayerPawn",
+                "dwLocalPlayerController",
+                "dwViewMatrix",
+            }
+            valid = (
+                isinstance(offsets_data, dict)
+                and required.issubset(offsets_data)
+                and all(isinstance(offsets_data[key], int) and offsets_data[key] > 0 for key in required)
+            )
+        elif config_key == "ClientDLLFile":
+            client_data = payload.get("client.dll", payload) if isinstance(payload, dict) else {}
+            valid = (
+                isinstance(client_data, dict)
+                and isinstance(client_data.get("classes"), dict)
+                and bool(client_data["classes"])
+            )
+        else:
+            buttons_data = payload.get("client.dll", payload) if isinstance(payload, dict) else {}
+            valid = (
+                isinstance(buttons_data, dict)
+                and isinstance(buttons_data.get("jump"), int)
+                and buttons_data["jump"] > 0
+            )
+
+        if not valid:
+            raise ValueError("Unexpected JSON structure")
+        return True
+    except (OSError, ValueError, TypeError, json.JSONDecodeError) as e:
+        messagebox.showerror(
+            "Invalid Offsets File",
+            f"The selected file is not a valid {config_key} JSON file.\n\n{e}",
+        )
+        return False
+
 def create_section_header(parent, title, subtitle):
     """Создает стандартизированный заголовок подраздела настроек."""
     header = ctk.CTkFrame(parent, fg_color="transparent")
@@ -45,6 +91,8 @@ def create_section_header(parent, title, subtitle):
 
 def populate_general_settings(main_window, frame):
     """Инициализирует и строит вкладку General Settings."""
+    config = ConfigManager.load_config()
+    general_config = config.get("General", {})
     settings = ctk.CTkScrollableFrame(frame, fg_color="transparent")
     settings.pack(fill="both", expand=True, padx=40, pady=40)
     
@@ -64,8 +112,8 @@ def populate_general_settings(main_window, frame):
         text_color=COLOR_TEXT_SECONDARY, anchor="w"
     ).pack(side="left", padx=(20, 0), pady=(10, 0))
 
-    create_features_section(main_window, settings)
-    create_offsets_section(main_window, settings)
+    create_features_section(main_window, settings, general_config)
+    create_offsets_section(main_window, settings, general_config)
     create_reset_section(main_window, settings)
 
 def create_reset_section(main_window, parent):
@@ -87,7 +135,7 @@ def create_reset_section(main_window, parent):
         button_frame, text="🔄  Reset All Settings", width=280,
         command=main_window.reset_to_default_settings, **BUTTON_STYLE_DANGER
     ).pack(side="left")
-def create_features_section(main_window, parent):
+def create_features_section(main_window, parent, general_config):
     """Создает секцию включения и выключения основных функций софта."""
     section = ctk.CTkFrame(parent, **SECTION_STYLE)
     section.pack(fill="x", pady=(0, 30))
@@ -102,10 +150,11 @@ def create_features_section(main_window, parent):
             widget_type=widget,
             key=key,
             main_window=main_window,
+            general_config=general_config,
             is_last=(i == len(FEATURE_SETTINGS) - 1)
         )
 
-def create_offsets_section(main_window, parent):
+def create_offsets_section(main_window, parent, general_config):
     """Создает секцию выбора источника смещений (дампера) и локальных файлов."""
     section = ctk.CTkFrame(parent, **SECTION_STYLE)
     section.pack(fill="x", pady=(0, 30))
@@ -121,8 +170,7 @@ def create_offsets_section(main_window, parent):
     main_window.offset_source_mapping = source_mapping
     dropdown_values = list(source_mapping.keys())
 
-    # Безопасное чтение через глобальный ConfigManager вместо прямого обращения к триггерботу
-    current_source = ConfigManager.get_value("General", "OffsetSource", default="a2x")
+    current_source = general_config.get("OffsetSource", "a2x")
     current_display = next((name for name, sid in source_mapping.items() if sid == current_source), dropdown_values[0])
 
     main_window.offset_source_var = ctk.StringVar(value=current_display)
@@ -141,9 +189,25 @@ def create_offsets_section(main_window, parent):
 
     main_window.local_file_paths = {}
     for label, filename, desc, config_key in OFFSET_FILES:
-        create_file_selector(main_window, main_window.local_files_frame, label, filename, desc, config_key)
+        create_file_selector(
+            main_window,
+            main_window.local_files_frame,
+            label,
+            filename,
+            desc,
+            config_key,
+            general_config,
+        )
 
-def create_file_selector(main_window, parent, label_text, filename, description, config_key):
+def create_file_selector(
+    main_window,
+    parent,
+    label_text,
+    filename,
+    description,
+    config_key,
+    general_config,
+):
     """Создает элемент выбора конкретного JSON-файла смещений с диска."""
     item_frame = ctk.CTkFrame(parent, fg_color="transparent")
     item_frame.pack(fill="x", padx=0, pady=(0, 10))
@@ -176,12 +240,21 @@ def create_file_selector(main_window, parent, label_text, filename, description,
             initialdir=Path(ConfigManager.CONFIG_DIRECTORY)
         )
         if file_path:
+            if not _validate_selected_offset_file(file_path, config_key):
+                return
+            config = ConfigManager.load_config()
+            config.setdefault("General", {})[config_key] = file_path
+            if not ConfigManager.save_config(config, log_info=False):
+                messagebox.showerror(
+                    "Save Error",
+                    f"Failed to save path for {filename}.",
+                )
+                return
             main_window.local_file_paths[filename] = file_path
             file_button.configure(text=f"Selected: {os.path.basename(file_path)}")
-            ConfigManager.set_value("General", config_key, file_path)
-            main_window.save_settings(show_message=False)
+            updater.invalidate()
 
-    current_file = ConfigManager.get_value("General", config_key, default="")
+    current_file = general_config.get(config_key, "")
     button_text = f"Selected: {os.path.basename(current_file)}" if current_file and os.path.exists(current_file) else f"Select {filename}"
 
     file_button = ctk.CTkButton(
@@ -192,8 +265,40 @@ def create_file_selector(main_window, parent, label_text, filename, description,
 
 def update_offset_source(main_window, selected_source_id):
     """Обновляет источник смещений в конфигурации и переключает видимость фреймов."""
-    ConfigManager.set_value("General", "OffsetSource", selected_source_id)
-    
+    if selected_source_id == "local":
+        config = ConfigManager.load_config()
+        general = config.get("General", {})
+        missing = [
+            label
+            for label, _, _, key in OFFSET_FILES
+            if not Path(general.get(key, "")).is_file()
+        ]
+        if missing:
+            messagebox.showerror(
+                "Local Offsets Missing",
+                "Select all required local files before enabling the local source:\n\n"
+                + "\n".join(missing),
+            )
+            current_display = next(
+                name
+                for name, source_id in main_window.offset_source_mapping.items()
+                if source_id == "a2x"
+            )
+            main_window.offset_source_var.set(current_display)
+            return
+
+    if not ConfigManager.set_value(
+        "General",
+        "OffsetSource",
+        value=selected_source_id,
+    ):
+        messagebox.showerror("Save Error", "Failed to save the offsets source.")
+        return
+
+    # Сбрасываем данные текущего источника: следующий запуск клиента гарантированно
+    # загрузит выбранные файлы или сетевой a2x, а не старый снимок.
+    updater.invalidate()
+
     messagebox.showwarning(
         "Restart Required", 
         "Offset source has been changed. Please restart the application for the changes to take effect."
@@ -204,7 +309,16 @@ def update_offset_source(main_window, selected_source_id):
     else:
         main_window.local_files_frame.pack_forget()
 
-def create_setting_item(parent, label_text, description, widget_type, key, main_window, is_last=False):
+def create_setting_item(
+    parent,
+    label_text,
+    description,
+    widget_type,
+    key,
+    main_window,
+    general_config,
+    is_last=False,
+):
     """Универсальный элемент строки настроек с текстовым описанием и чекбоксом."""
     item_frame = ctk.CTkFrame(parent, fg_color="transparent")
     item_frame.pack(fill="x", padx=40, pady=(0, 30 if not is_last else 40))
@@ -232,8 +346,7 @@ def create_setting_item(parent, label_text, description, widget_type, key, main_
     widget_frame.pack(side="right", padx=(30, 0))
     
     if widget_type == "checkbox":
-        # Безопасное чтение дефолтного значения чекбокса через ConfigManager
-        initial_val = ConfigManager.get_value("General", key, default=False)
+        initial_val = general_config.get(key, False)
         var = ctk.BooleanVar(value=initial_val)
         
         ctk.CTkCheckBox(

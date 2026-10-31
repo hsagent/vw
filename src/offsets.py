@@ -3,8 +3,12 @@ import json
 import threading
 import requests
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 from classes.config_manager import ConfigManager
+from classes.logger import Logger
+
+logger = Logger.get_logger(__name__)
 
 class OffsetManager:
     def __init__(self, source_name="a2x", config_path="sources.json"):
@@ -21,6 +25,7 @@ class OffsetManager:
         self.offsets = {}
         self.client = {}
         self.buttons = {}
+        self._loaded_source = None
         self._fetch_lock = threading.Lock()
         self._load_urls_from_config()
 
@@ -38,13 +43,14 @@ class OffsetManager:
                 self.urls["buttons"] = src["buttons_url"]
         except Exception:
             pass
-    def fetch_offsets(self) -> bool:
-        """Потокобезопасная загрузка: prefetch из main.py и старт клиента
-        могут запросить оффсеты одновременно."""
+    def invalidate(self) -> None:
+        """Помечает текущий снимок устаревшим после изменения GUI-настроек."""
         with self._fetch_lock:
-            if self.offsets and self.client:
-                return True
-            return self._fetch_offsets_locked()
+            self._loaded_source = None
+
+    def fetch_offsets(self) -> bool:
+        """Загружает источник offsets, выбранный в конфигурации."""
+        return self.load_configured_offsets()
 
     def _fetch_offsets_locked(self) -> bool:
         """Скачивает актуальные оффсеты и принудительно сохраняет их в папку AppData."""
@@ -60,6 +66,7 @@ class OffsetManager:
                 if not self._validate_payloads(offsets, client, buttons):
                     raise ValueError("Некорректная структура JSON оффсетов")
                 self.offsets, self.client, self.buttons = offsets, client, buttons
+                self._loaded_source = "a2x"
                 
                 # Папка хранения — та же, что и у конфигурации приложения
                 appdata_target_dir = ConfigManager.OFFSETS_DIRECTORY
@@ -86,10 +93,99 @@ class OffsetManager:
 
     @staticmethod
     def _validate_payloads(offsets, client, buttons) -> bool:
+        offsets_data = offsets.get("client.dll", {}) if isinstance(offsets, dict) else {}
+        required_offsets = {
+            "dwEntityList",
+            "dwLocalPlayerPawn",
+            "dwLocalPlayerController",
+            "dwViewMatrix",
+        }
         client_data = client.get("client.dll", client) if isinstance(client, dict) else {}
-        return (isinstance(offsets, dict) and "client.dll" in offsets
-                and isinstance(client_data, dict) and "classes" in client_data
-                and isinstance(buttons, dict) and bool(buttons))
+        buttons_data = buttons.get("client.dll", buttons) if isinstance(buttons, dict) else {}
+        return (
+            isinstance(offsets_data, dict)
+            and required_offsets.issubset(offsets_data)
+            and all(isinstance(offsets_data[key], int) and offsets_data[key] > 0 for key in required_offsets)
+            and isinstance(client_data, dict)
+            and isinstance(client_data.get("classes"), dict)
+            and bool(client_data["classes"])
+            and isinstance(buttons_data, dict)
+            and isinstance(buttons_data.get("jump"), int)
+            and buttons_data["jump"] > 0
+        )
+
+    @staticmethod
+    def _configured_local_paths(general_config):
+        """Возвращает нормализованные пути локальных файлов из config.json."""
+        defaults = {
+            "offsets": Path(ConfigManager.OFFSETS_DIRECTORY) / "offsets.json",
+            "client": Path(ConfigManager.OFFSETS_DIRECTORY) / "client_dll.json",
+            "buttons": Path(ConfigManager.OFFSETS_DIRECTORY) / "buttons.json",
+        }
+        return {
+            "offsets": Path(general_config.get("OffsetsFile") or defaults["offsets"]).expanduser(),
+            "client": Path(general_config.get("ClientDLLFile") or defaults["client"]).expanduser(),
+            "buttons": Path(general_config.get("ButtonsFile") or defaults["buttons"]).expanduser(),
+        }
+
+    def load_configured_offsets(self, force_reload: bool = False) -> bool:
+        """Загружает источник, выбранный в General.OffsetSource."""
+        with self._fetch_lock:
+            config = ConfigManager.load_config()
+            general = config.get("General", {})
+            source = general.get("OffsetSource", "a2x")
+
+            if source == "local":
+                if not force_reload and self._loaded_source == "local" and self.offsets and self.client and self.buttons:
+                    return True
+                return self._load_local_offsets_locked(general)
+
+            if source != "a2x":
+                logger.error("[Offsets] Неизвестный источник: %s", source)
+                return False
+
+            if not force_reload and self._loaded_source == "a2x" and self.offsets and self.client and self.buttons:
+                return True
+            return self._fetch_offsets_locked()
+
+    def _load_local_offsets_locked(self, general_config) -> bool:
+        """Читает и проверяет три выбранных пользователем JSON-файла."""
+        paths = self._configured_local_paths(general_config)
+        try:
+            missing = [str(path) for path in paths.values() if not path.is_file()]
+            if missing:
+                raise FileNotFoundError("Не найдены файлы: " + ", ".join(missing))
+
+            payloads = {}
+            for name, path in paths.items():
+                with path.open("r", encoding="utf-8-sig") as file:
+                    payloads[name] = json.load(file)
+
+            if not self._validate_payloads(
+                payloads["offsets"],
+                payloads["client"],
+                payloads["buttons"],
+            ):
+                raise ValueError("Некорректная структура файлов offsets/client_dll/buttons")
+
+            self.offsets = payloads["offsets"]
+            self.client = payloads["client"]
+            self.buttons = payloads["buttons"]
+            self._loaded_source = "local"
+            logger.info(
+                "[Offsets] Используются локальные файлы: %s; %s; %s",
+                paths["offsets"],
+                paths["client"],
+                paths["buttons"],
+            )
+            return True
+        except (OSError, ValueError, json.JSONDecodeError) as e:
+            self.offsets = {}
+            self.client = {}
+            self.buttons = {}
+            self._loaded_source = None
+            logger.error("[Offsets] Не удалось загрузить локальные файлы: %s", e)
+            return False
 
     def load_cached_offsets(self) -> bool:
         """Загружает ранее сохранённые оффсеты из AppData (работа без сети)."""
@@ -101,9 +197,13 @@ class OffsetManager:
                 self.client = json.load(f)
             with open(os.path.join(cache_dir, "buttons.json"), "r", encoding="utf-8") as f:
                 self.buttons = json.load(f)
-            if self.offsets and self.client:
+            if self._validate_payloads(self.offsets, self.client, self.buttons):
+                self._loaded_source = "a2x"
                 print(f"[Offsets] Сеть недоступна — использован локальный кэш: {cache_dir}")
                 return True
+            self.offsets = {}
+            self.client = {}
+            self.buttons = {}
         except Exception as e:
             print(f"[Offsets] Локальный кэш смещений недоступен: {e}")
         return False

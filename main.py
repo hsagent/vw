@@ -1,3 +1,4 @@
+import atexit
 import os
 import sys
 import signal
@@ -11,8 +12,8 @@ if PROJECT_ROOT not in sys.path:
 
 from classes.logger import Logger
 from classes.config_manager import ConfigManager
+from classes.crash_diagnostics import CrashDiagnostics
 from src.offsets import updater
-from gui.main_window import MainWindow
 
 def setup_signal_handlers(logger):
     """Настраивает обработчики системных сигналов ОС для чистого закрытия софта."""
@@ -33,6 +34,31 @@ def main():
         print(f"Fatal Error: Не удалось запустить систему логирования: {e}", file=sys.stderr)
         sys.exit(1)
 
+    diagnostics = CrashDiagnostics()
+    crash_report = diagnostics.enable(
+        Logger.LOG_DIRECTORY(),
+        version=ConfigManager.VERSION,
+    )
+    if crash_report is not None:
+        logger.info("Аварийная диагностика включена: %s", crash_report)
+    atexit.register(diagnostics.close)
+
+    # Import the GUI only after faulthandler is active. MainWindow imports the
+    # native pyMeow extension through the overlay implementation.
+    try:
+        from gui.main_window import MainWindow
+    except ImportError:
+        logger.exception(
+            "Критическая ошибка импорта модулей. Убедитесь, что все зависимости "
+            "(pymem, pyMeow, customtkinter, orjson, watchdog, pynput) установлены."
+        )
+        diagnostics.close()
+        try:
+            Logger.shutdown()
+        finally:
+            atexit.unregister(diagnostics.close)
+        return 2
+
     setup_signal_handlers(logger)
 
     # 2. Вывод текущей версии сборки софта
@@ -46,9 +72,9 @@ def main():
     # запуск GUI, если GitHub/дампер отвечает медленно.
     def prefetch_offsets():
         try:
-            logger.info("[Offsets] Синхронизация сетевых структур с авто-дампером a2x...")
-            if not updater.fetch_offsets():
-                logger.warning("[Offsets] Не удалось обновить оффсеты через сеть. Софт задействует локальный кэш.")
+            logger.info("[Offsets] Предварительная загрузка выбранного источника смещений...")
+            if not updater.load_configured_offsets():
+                logger.warning("[Offsets] Не удалось загрузить выбранный источник смещений.")
         except Exception as e:
             logger.error(f"[Offsets] Ошибка при инициализации смещений дампера: {e}")
 
@@ -84,14 +110,17 @@ def main():
                 logger.warning("Ошибка при закрытии ресурсов окна: %s", cleanup_error)
         
         logger.debug("Программа My Project полностью закрыта")
-        
+
+        diagnostics.close()
+        atexit.unregister(diagnostics.close)
+
         # Сохраняем буфер логов на диск перед выходом
         try:
             Logger.shutdown()
         except Exception:
-            pass  
+            pass
 
-    sys.exit(exit_code)
+    return exit_code
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

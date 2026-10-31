@@ -14,7 +14,7 @@ MOUSEEVENTF_LEFTDOWN = 0x0002
 MOUSEEVENTF_LEFTUP = 0x0004
 INPUT_MOUSE = 0
 
-LOOP_SLEEP = 0.001
+LOOP_SLEEP = 0.002
 IDLE_SLEEP = 0.005
 ACTIVE_CHECK_INTERVAL = 0.25
 TARGET_GRACE = 0.3
@@ -184,7 +184,8 @@ class CS2TriggerBot:
                         if now - self._last_diag_log >= 5.0:
                             self._last_diag_log = now
                             logger.debug("Trigger: окно CS2 не активно")
-                        time.sleep(0.05)
+                        if self.stop_event.wait(0.05):
+                            break
                         continue
 
                     key_down = _is_key_down(self.trigger_vk)
@@ -209,7 +210,8 @@ class CS2TriggerBot:
                                     f"Trigger: цель id={idx} под прицелом, но клавиша "
                                     f"{self.trigger_key} не нажата"
                                 )
-                        time.sleep(IDLE_SLEEP)
+                        if self.stop_event.wait(IDLE_SLEEP):
+                            break
                         continue
 
                     if not self._active_logged:
@@ -223,7 +225,8 @@ class CS2TriggerBot:
                         # задержка реакции (0.1 с у винтовок) всё время
                         # перезапускается и выстрела не происходит.
                         if self._has_target and (now - self._last_target_seen) <= TARGET_GRACE:
-                            time.sleep(LOOP_SLEEP)
+                            if self.stop_event.wait(LOOP_SLEEP):
+                                break
                             continue
                         # Grace period истек или цели никогда не было
                         self._reset_target()
@@ -233,7 +236,8 @@ class CS2TriggerBot:
                                 "Trigger: активен, цели нет "
                                 f"(m_iIDEntIndex={self.memory_manager.get_crosshair_entity_index()})"
                             )
-                        time.sleep(LOOP_SLEEP)
+                        if self.stop_event.wait(LOOP_SLEEP):
+                            break
                         continue
 
                     self._last_target_seen = now
@@ -272,9 +276,15 @@ class CS2TriggerBot:
                                     "проверь, что приложение запущено от администратора"
                                 )
                             self._next_shot_at = time.monotonic() + 0.1
+
+                    remaining = self._next_shot_at - time.monotonic()
+                    wait_time = min(IDLE_SLEEP, max(LOOP_SLEEP, remaining))
+                    if self.stop_event.wait(wait_time):
+                        break
                 except Exception as e:
                     logger.debug(f"Ошибка в цикле TriggerBot: {e}")
-                    time.sleep(0.05)
+                    if self.stop_event.wait(0.05):
+                        break
         finally:
             self.is_running = False
             self._toggle_active = False

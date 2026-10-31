@@ -12,6 +12,11 @@ logger = Logger.get_logger(__name__)
 
 def populate_additional_settings(main_window, frame):
     """Инициализирует и строит вкладку дополнительных настроек Bunnyhop и NoFlash."""
+    config = ConfigManager.load_config()
+    bunnyhop_config = config.get("Bunnyhop", {})
+    noflash_config = config.get("NoFlash", {})
+    main_window._noflash_runtime_config = config
+    main_window._noflash_pending_value = None
     settings = ctk.CTkScrollableFrame(frame, fg_color="transparent")
     settings.pack(fill="both", expand=True, padx=40, pady=40)
     
@@ -32,10 +37,10 @@ def populate_additional_settings(main_window, frame):
     ).pack(side="left", padx=(20, 0), pady=(10, 0))
     
     # Генерируем подразделы функций
-    create_bunnyhop_config_section(main_window, settings)
-    create_noflash_config_section(main_window, settings)
+    create_bunnyhop_config_section(main_window, settings, bunnyhop_config)
+    create_noflash_config_section(main_window, settings, noflash_config)
 
-def create_bunnyhop_config_section(main_window, parent):
+def create_bunnyhop_config_section(main_window, parent, bunnyhop_config):
     """Создает подраздел конфигурации Bunnyhop."""
     section = ctk.CTkFrame(parent, **SECTION_STYLE)
     section.pack(fill="x", pady=(0, 30))
@@ -52,9 +57,18 @@ def create_bunnyhop_config_section(main_window, parent):
     ]
     
     for i, (label_text, widget_type, key, description) in enumerate(settings_list):
-        create_setting_item(section, label_text, description, widget_type, key, main_window, is_last=(i == len(settings_list) - 1))
+        create_setting_item(
+            section,
+            label_text,
+            description,
+            widget_type,
+            key,
+            main_window,
+            bunnyhop_config,
+            is_last=(i == len(settings_list) - 1),
+        )
 
-def create_noflash_config_section(main_window, parent):
+def create_noflash_config_section(main_window, parent, noflash_config):
     """Создает подраздел конфигурации NoFlash."""
     section = ctk.CTkFrame(parent, **SECTION_STYLE)
     section.pack(fill="x", pady=(0, 30))
@@ -70,8 +84,27 @@ def create_noflash_config_section(main_window, parent):
     ]
     
     for i, (label_text, widget_type, key, description) in enumerate(settings_list):
-        create_setting_item(section, label_text, description, widget_type, key, main_window, is_last=(i == len(settings_list) - 1))
-def create_setting_item(parent, label_text, description, widget_type, key, main_window, is_last=False):
+        create_setting_item(
+            section,
+            label_text,
+            description,
+            widget_type,
+            key,
+            main_window,
+            noflash_config,
+            is_last=(i == len(settings_list) - 1),
+        )
+
+def create_setting_item(
+    parent,
+    label_text,
+    description,
+    widget_type,
+    key,
+    main_window,
+    section_config,
+    is_last=False,
+):
     """Создает стандартизированную строку настройки с текстовым описанием и виджетом."""
     item_frame = ctk.CTkFrame(parent, fg_color="transparent")
     item_frame.pack(fill="x", padx=40, pady=(0, 30 if not is_last else 40))
@@ -96,14 +129,14 @@ def create_setting_item(parent, label_text, description, widget_type, key, main_
         
         if key == "JumpKey":
             main_window.jump_key_entry = widget
-            current_key = ConfigManager.get_value("Bunnyhop", "JumpKey", default="space")
+            current_key = section_config.get("JumpKey", "space")
             widget.delete(0, "end")
             widget.insert(0, str(current_key))
             widget.bind("<FocusOut>", lambda e: main_window.save_settings())
             widget.bind("<Return>", lambda e: main_window.save_settings())
         elif key == "JumpDelay":
             main_window.jump_delay_entry = widget
-            current_delay = ConfigManager.get_value("Bunnyhop", "JumpDelay", default=0.01)
+            current_delay = section_config.get("JumpDelay", 0.01)
             widget.delete(0, "end")
             widget.insert(0, str(current_delay))
             widget.bind("<FocusOut>", lambda e: main_window.save_settings())
@@ -118,8 +151,9 @@ def create_setting_item(parent, label_text, description, widget_type, key, main_
         value_frame.pack(side="right", padx=(15, 0))
         value_frame.pack_propagate(False)
         
-        # Получаем значение альфа-канала ослепления из конфига (дефолт 255.0 - обычный белый экран)
-        current_strength = float(ConfigManager.get_value("NoFlash", "FlashSuppressionStrength", default=255.0))
+        current_strength = float(
+            section_config.get("FlashSuppressionStrength", 255.0)
+        )
         
         value_label = ctk.CTkLabel(value_frame, text=f"{current_strength:.0f}", font=FONT_ITEM_LABEL, text_color=COLOR_TEXT_PRIMARY)
         value_label.pack(expand=True)
@@ -148,17 +182,34 @@ def update_slider_value(value, key, main_window):
     if slider and hasattr(slider, 'value_label'):
         slider.value_label.configure(text=f"{value:.0f}")
         
-        # Откладываем запись до окончания движения, чтобы не писать JSON
-        # на каждый пиксель перемещения ползунка.
+        normalized_value = float(value)
+        runtime_config = getattr(main_window, "_noflash_runtime_config", None)
+        if runtime_config is None:
+            runtime_config = ConfigManager.load_config()
+            main_window._noflash_runtime_config = runtime_config
+        runtime_config.setdefault("NoFlash", {})[key] = normalized_value
+        noflash = getattr(main_window, "noflash", None)
+        if noflash is not None and getattr(noflash, "is_running", False):
+            noflash.update_config(runtime_config)
+
         timer = getattr(main_window, "_noflash_save_timer", None)
         if timer is not None:
             main_window.root.after_cancel(timer)
+        main_window._noflash_pending_value = (key, normalized_value)
+
         def save_value():
-            saved = ConfigManager.set_value("NoFlash", key, value=float(value))
-            if not saved:
-                logger.error("Не удалось сохранить параметр NoFlash.%s", key)
+            main_window._noflash_save_timer = None
+            pending = main_window._noflash_pending_value
+            main_window._noflash_pending_value = None
+            if pending is None:
                 return
-            if hasattr(main_window, 'client_manager'):
-                current_config = ConfigManager.load_config()
-                main_window.client_manager.update_running_feature_configs(current_config)
+            pending_key, pending_value = pending
+            saved = ConfigManager.set_value(
+                "NoFlash",
+                pending_key,
+                value=pending_value,
+            )
+            if not saved:
+                logger.error("Не удалось сохранить параметр NoFlash.%s", pending_key)
+
         main_window._noflash_save_timer = main_window.root.after(250, save_value)

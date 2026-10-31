@@ -1,10 +1,13 @@
 import customtkinter as ctk
 from classes.config_manager import ConfigManager, COLOR_CHOICES
+from classes.logger import Logger
 from classes.utility import Utility
 from gui.theme import (CHECKBOX_STYLE, COMBOBOX_STYLE, ENTRY_STYLE, SLIDER_STYLE,
-                        SECTION_STYLE, SETTING_ITEM_STYLE, FONT_TITLE, FONT_SUBTITLE, 
-                        FONT_SECTION_TITLE, FONT_SECTION_DESCRIPTION, FONT_ITEM_LABEL, 
+                        SECTION_STYLE, SETTING_ITEM_STYLE, FONT_TITLE, FONT_SUBTITLE,
+                        FONT_SECTION_TITLE, FONT_SECTION_DESCRIPTION, FONT_ITEM_LABEL,
                         FONT_ITEM_DESCRIPTION, COLOR_TEXT_PRIMARY, COLOR_TEXT_SECONDARY, COLOR_BORDER)
+
+logger = Logger.get_logger(__name__)
 
 def populate_overlay_settings(main_window, frame):
     """
@@ -12,6 +15,11 @@ def populate_overlay_settings(main_window, frame):
     Все изменения конфигурации применяются к ESP в реальном времени.
     """
     main_window.overlay_widgets = {}
+    config = ConfigManager.load_config()
+    overlay_config = config.get("Overlay", {})
+    main_window._overlay_runtime_config = config
+    main_window._overlay_save_timers = {}
+    main_window._overlay_pending_values = {}
     settings = ctk.CTkScrollableFrame(frame, fg_color="transparent")
     settings.pack(fill="both", expand=True, padx=40, pady=40)
     
@@ -79,6 +87,7 @@ def populate_overlay_settings(main_window, frame):
             f"{section_data['icon']}  {section_data['title']}",
             section_data["description"],
             section_data["settings"],
+            overlay_config,
         )
 
 def create_title_section(parent):
@@ -95,7 +104,7 @@ def create_title_section(parent):
         text_color=COLOR_TEXT_SECONDARY, anchor="w",
     ).pack(side="left", padx=(20, 0), pady=(10, 0))
 
-def create_settings_section(main_window, parent, title, description, settings_list):
+def create_settings_section(main_window, parent, title, description, settings_list, overlay_config):
     section = ctk.CTkFrame(parent, **SECTION_STYLE)
     section.pack(fill="x", pady=(0, 30))
 
@@ -106,8 +115,11 @@ def create_settings_section(main_window, parent, title, description, settings_li
     ctk.CTkLabel(header, text=description, font=FONT_SECTION_DESCRIPTION, text_color=COLOR_TEXT_SECONDARY, anchor="e").pack(side="right")
 
     for i, (label_text, widget_type, key, desc) in enumerate(settings_list):
-        create_setting_item(section, label_text, desc, widget_type, key, main_window, is_last=(i == len(settings_list) - 1))
-def create_setting_item(parent, label_text, description, widget_type, key, main_window, is_last=False):
+        create_setting_item(
+            section, label_text, desc, widget_type, key, main_window,
+            overlay_config, is_last=(i == len(settings_list) - 1),
+        )
+def create_setting_item(parent, label_text, description, widget_type, key, main_window, overlay_config, is_last=False):
     item_frame = ctk.CTkFrame(parent, fg_color="transparent")
     item_frame.pack(fill="x", padx=40, pady=(0, 30 if not is_last else 40))
 
@@ -134,12 +146,11 @@ def create_setting_item(parent, label_text, description, widget_type, key, main_
     }
 
     if widget_type in widget_creators:
-        widget_info = widget_creators[widget_type](widget_frame, key, main_window)
+        widget_info = widget_creators[widget_type](widget_frame, key, main_window, overlay_config)
         main_window.overlay_widgets[key] = widget_info
 
-def _create_checkbox(parent, key, main_window):
-    # Безопасное получение булева флага оверлея
-    initial_val = ConfigManager.get_value("Overlay", key, default=False)
+def _create_checkbox(parent, key, main_window, overlay_config):
+    initial_val = overlay_config.get(key, False)
     var = ctk.BooleanVar(value=initial_val)
     
     widget = ctk.CTkCheckBox(
@@ -150,8 +161,8 @@ def _create_checkbox(parent, key, main_window):
     widget.pack()
     return {"widget": widget, "variable": var}
 
-def _create_entry(parent, key, main_window):
-    initial_val = ConfigManager.get_value("Overlay", key, default="")
+def _create_entry(parent, key, main_window, overlay_config):
+    initial_val = overlay_config.get(key, "")
     widget = ctk.CTkEntry(parent, justify="center", **ENTRY_STYLE)
     widget.insert(0, str(initial_val))
     widget.bind("<FocusOut>", lambda e: main_window.save_settings(show_message=False))
@@ -159,7 +170,7 @@ def _create_entry(parent, key, main_window):
     widget.pack()
     return {"widget": widget}
 
-def _create_slider(parent, key, main_window):
+def _create_slider(parent, key, main_window, overlay_config):
     slider_container = ctk.CTkFrame(parent, fg_color="transparent")
     slider_container.pack()
 
@@ -168,7 +179,7 @@ def _create_slider(parent, key, main_window):
     value_frame.pack_propagate(False)
 
     # Получаем числовое значение слайдера из конфига
-    current_val = float(ConfigManager.get_value("Overlay", key, default=60.0 if key == "target_fps" else 1.0))
+    current_val = float(overlay_config.get(key, 60.0 if key == "target_fps" else 1.0))
 
     value_label = ctk.CTkLabel(
         value_frame,
@@ -190,13 +201,13 @@ def _create_slider(parent, key, main_window):
 
     return {"widget": widget, "value_label": value_label}
 
-def _create_combobox(parent, key, main_window):
+def _create_combobox(parent, key, main_window, overlay_config):
     widget = ctk.CTkComboBox(
         parent, values=list(COLOR_CHOICES.keys()), state="readonly", justify="center",
         command=lambda e: main_window.save_settings(show_message=False),
         **COMBOBOX_STYLE,
     )
-    current_hex = ConfigManager.get_value("Overlay", key, default="#FFA500")
+    current_hex = overlay_config.get(key, "#FFA500")
     widget.set(Utility.get_color_name_from_hex(current_hex))
     widget.bind("<FocusOut>", lambda e: main_window.save_settings(show_message=False))
     widget.bind("<Return>", lambda e: main_window.save_settings(show_message=False))
@@ -204,16 +215,37 @@ def _create_combobox(parent, key, main_window):
     return {"widget": widget}
 
 def update_slider_value(value, key, main_window):
-    """Обновляет текстовый маркер слайдера и безопасно перезаписывает конфиг."""
+    """Применяет значение сразу, а запись на диск откладывает до конца движения."""
     slider_info = main_window.overlay_widgets.get(key, {})
-    if "value_label" in slider_info:
-        format_spec = ".0f" if key == "target_fps" else ".1f"
-        slider_info["value_label"].configure(text=f"{value:{format_spec}}")
-        
-        # Сохраняем значение ползунка напрямую через ConfigManager, убирая микрофризы
-        ConfigManager.set_value("Overlay", key, float(value))
-        
-        # Сообщаем запущенному рендер-потоку новые параметры
-        if hasattr(main_window, 'client_manager'):
-            current_config = ConfigManager.load_config()
-            main_window.client_manager.update_running_feature_configs(current_config)
+    if "value_label" not in slider_info:
+        return
+
+    format_spec = ".0f" if key == "target_fps" else ".1f"
+    slider_info["value_label"].configure(text=f"{value:{format_spec}}")
+    normalized_value = int(round(value)) if key == "target_fps" else float(value)
+
+    runtime_config = getattr(main_window, "_overlay_runtime_config", None)
+    if runtime_config is None:
+        runtime_config = ConfigManager.load_config()
+        main_window._overlay_runtime_config = runtime_config
+    runtime_config.setdefault("Overlay", {})[key] = normalized_value
+    overlay = getattr(main_window, "overlay", None)
+    if overlay is not None and getattr(overlay, "is_running", False):
+        overlay.update_config(runtime_config)
+
+    timers = getattr(main_window, "_overlay_save_timers", {})
+    pending_values = getattr(main_window, "_overlay_pending_values", {})
+    timer = timers.pop(key, None)
+    if timer is not None:
+        main_window.root.after_cancel(timer)
+    pending_values[key] = normalized_value
+
+    def save_value():
+        timers.pop(key, None)
+        value_to_save = pending_values.pop(key, normalized_value)
+        if not ConfigManager.set_value("Overlay", key, value=value_to_save):
+            logger.error("Не удалось сохранить параметр Overlay.%s", key)
+
+    timers[key] = main_window.root.after(300, save_value)
+    main_window._overlay_save_timers = timers
+    main_window._overlay_pending_values = pending_values

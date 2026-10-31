@@ -1,8 +1,37 @@
 import customtkinter as ctk
 import os
+from collections import deque
 from classes.logger import Logger
 from gui.theme import (FONT_TITLE, FONT_SUBTITLE, FONT_SECTION_TITLE, FONT_WIDGET,
                          COLOR_TEXT_PRIMARY, COLOR_TEXT_SECONDARY, SECTION_STYLE)
+
+LOG_DISPLAY_MAX_LINES = 5000
+LOG_READ_CHUNK_SIZE = 64 * 1024
+
+
+def _limit_log_text(text):
+    """Возвращает не больше последних строк, сохраняя исходные переводы строк."""
+    return "".join(deque(text.splitlines(keepends=True), maxlen=LOG_DISPLAY_MAX_LINES))
+
+
+def _read_log_tail(log_file, size):
+    """Читает с диска только хвост файла, достаточный для отображения логов."""
+    position = size
+    chunks = []
+    newline_count = 0
+    while position > 0 and newline_count <= LOG_DISPLAY_MAX_LINES:
+        chunk_size = min(LOG_READ_CHUNK_SIZE, position)
+        position -= chunk_size
+        log_file.seek(position)
+        chunk = log_file.read(chunk_size)
+        chunks.append(chunk)
+        newline_count += chunk.count(b"\n")
+    raw_text = b"".join(reversed(chunks))
+    if position > 0:
+        newline_index = raw_text.find(b"\n")
+        if newline_index >= 0:
+            raw_text = raw_text[newline_index + 1:]
+    return raw_text
 
 def populate_logs(main_window, frame):
     """Populate the logs frame with a text widget to display logs."""
@@ -160,8 +189,12 @@ def _load_logs_safely(main_window):
         new_text = ""
         if size > position:
             with open(log_path, "rb") as log_file:
-                log_file.seek(position)
-                new_text = log_file.read().decode("utf-8", errors="replace")
+                if position == 0:
+                    raw_text = _read_log_tail(log_file, size)
+                else:
+                    log_file.seek(position)
+                    raw_text = log_file.read()
+                new_text = raw_text.decode("utf-8", errors="replace")
             # Windows-логи содержат \r\n — приводим к \n, иначе в текстовом
             # виджете появляются лишние пустые строки.
             new_text = new_text.replace("\r\n", "\n").replace("\r", "\n")
@@ -186,6 +219,7 @@ def _load_logs_safely(main_window):
         else:
             main_window.log_text.configure(state="normal")
             main_window.log_text.insert("end", new_text)
+            _trim_content(main_window)
             main_window.log_text.see("end")
             main_window.log_text.configure(state="disabled")
 
@@ -202,8 +236,17 @@ def _load_logs_safely(main_window):
         logger.error(f"Unexpected error loading logs: {e}")
         _show_error_message(main_window, f"Error loading logs: {str(e)}")
 
+def _trim_content(main_window):
+    """Удаляет старые строки из Tk-виджета логов."""
+    line_count = int(main_window.log_text.index("end-1c").split(".")[0])
+    if line_count > LOG_DISPLAY_MAX_LINES:
+        first_line_to_keep = line_count - LOG_DISPLAY_MAX_LINES + 1
+        main_window.log_text.delete("1.0", f"{first_line_to_keep}.0")
+
+
 def _replace_content(main_window, text):
     """Helper to replace the entire content of the log widget."""
+    text = _limit_log_text(text)
     # Enable widget, clear content, insert new text, and disable again
     main_window.log_text.configure(state="normal")
     main_window.log_text.delete("1.0", "end")

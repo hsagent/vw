@@ -32,7 +32,7 @@ from gui.general_settings_tab import populate_general_settings
 from gui.trigger_settings_tab import populate_trigger_settings
 from gui.overlay_settings_tab import populate_overlay_settings
 from gui.additional_settings_tab import populate_additional_settings
-from gui.logs_tab import populate_logs
+from gui.logs_tab import populate_logs, LOG_DISPLAY_MAX_LINES
 from gui.faq_tab import populate_faq
 from gui.notifications_tab import populate_notifications
 from gui.supporters_tab import populate_supporters
@@ -57,6 +57,16 @@ class MainWindow:
         self.log_queue = queue.Queue()
         self.log_worker = None
         self.log_stop_event = threading.Event()
+        self._logs_initialized = False
+        self._overlay_save_timers = {}
+        self._overlay_pending_values = {}
+        self._overlay_runtime_config = None
+        self._noflash_save_timer = None
+        self._noflash_pending_value = None
+        self._noflash_runtime_config = None
+        self._update_thread = None
+        self._update_queue = queue.Queue()
+        self._update_timer = None
 
         # Конфигурация темного интерфейса CustomTkinter
         ctk.set_appearance_mode("dark")
@@ -106,7 +116,6 @@ class MainWindow:
         self.client_manager = ClientManager(self)
         self.setup_ui()
         self.init_config_watcher()
-        self.start_log_timer()
         
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
 
@@ -242,18 +251,20 @@ class MainWindow:
         return social_frame
 
     def create_update_button(self, parent):
-        """Create the update button if an update is available."""
+        """Проверяет обновления в фоне и создает кнопку в потоке Tkinter."""
         try:
             image = Image.open(Utility.resource_path('src/img/update_icon.png'))
-            ctk_image = ctk.CTkImage(light_image=image, dark_image=image, size=(24, 24))
+            update_image = ctk.CTkImage(light_image=image, dark_image=image, size=(24, 24))
         except Exception:
-            ctk_image = None
+            update_image = None
 
-        if self.updater.check_for_updates():
+        def show_update_button():
+            if not self.root.winfo_exists() or not self.updater.release_url:
+                return
             update_btn = ctk.CTkButton(
                 parent,
                 text="Pre-release Available!" if self.updater.is_prerelease else "Update Available!",
-                image=ctk_image,
+                image=update_image,
                 command=self.updater.handle_update,
                 width=120,
                 height=32,
@@ -263,6 +274,34 @@ class MainWindow:
                 font=("Chivo", 14)
             )
             update_btn.pack(side="left", padx=(8, 0))
+
+        def check_for_updates():
+            try:
+                update_available = self.updater.check_for_updates()
+                self._update_queue.put(update_available)
+            except Exception:
+                logger.exception("[Updater] Ошибка фоновой проверки обновлений.")
+
+        def process_update_result():
+            self._update_timer = None
+            try:
+                update_available = self._update_queue.get_nowait()
+            except queue.Empty:
+                if self._update_thread and self._update_thread.is_alive():
+                    self._update_timer = self.root.after(100, process_update_result)
+                return
+            except Exception:
+                return
+            if update_available:
+                show_update_button()
+
+        self._update_thread = threading.Thread(
+            target=check_for_updates,
+            daemon=True,
+            name="UpdateChecker",
+        )
+        self._update_thread.start()
+        self._update_timer = self.root.after(100, process_update_result)
     def create_main_content(self):
         """Create the main content area with a modern layout."""
         main_container = ctk.CTkFrame(self.root, fg_color="transparent")
@@ -288,10 +327,9 @@ class MainWindow:
         }
 
         self.tab_frames = {}
-        for key, populate_func in self.tab_views.items():
-            frame = ctk.CTkFrame(self.content_frame, fg_color="transparent")
-            self.tab_frames[key] = frame
-            populate_func(frame)
+        self.populated_tabs = set()
+        for key in self.tab_views:
+            self.tab_frames[key] = ctk.CTkFrame(self.content_frame, fg_color="transparent")
 
         self.current_view = None
         self.switch_view("dashboard")
@@ -354,18 +392,23 @@ class MainWindow:
                 )
 
     def switch_view(self, view_key):
-        """Switch between different views by showing the appropriate frame."""
+        """Создает вкладку при первом открытии и показывает ее."""
         if self.current_view == view_key:
+            return
+        if view_key not in self.tab_frames:
             return
 
         if self.current_view and self.current_view in self.tab_frames:
             self.tab_frames[self.current_view].pack_forget()
 
+        frame = self.tab_frames[view_key]
+        if view_key not in self.populated_tabs:
+            self.tab_views[view_key](frame)
+            self.populated_tabs.add(view_key)
+
         self.current_view = view_key
         self.set_active_nav(view_key)
-
-        if view_key in self.tab_frames:
-            self.tab_frames[view_key].pack(fill="both", expand=True)
+        frame.pack(fill="both", expand=True)
 
     def populate_dashboard(self, frame):
         """Populate the dashboard frame with controls and stats."""
@@ -390,6 +433,9 @@ class MainWindow:
     def populate_logs(self, frame):
         """Populate the logs frame with log display."""
         populate_logs(self, frame)
+        if not self._logs_initialized:
+            self._logs_initialized = True
+            self.start_log_timer()
 
     def populate_faq(self, frame):
         """Populate the FAQ frame with questions and answers."""
@@ -415,19 +461,16 @@ class MainWindow:
     def start_client(self): self.client_manager.start_client()
     def stop_client(self): self.client_manager.stop_client()
 
-    def update_weapon_settings_display(self):
+    def update_weapon_settings_display(self, trigger_settings=None):
         """Синхронизирует отображение задержек триггербота для выбранного типа оружия."""
         try:
-            from classes.config_manager import ConfigManager
-            
             # Получаем текущий выбранный в выпадающем списке тип оружия (например, 'Rifles')
             wt = self.active_weapon_type.get()
-            
-            # Безопасно загружаем всю структуру конфигурации
-            full_config = ConfigManager.load_config()
-            
+
+            if trigger_settings is None:
+                trigger_settings = ConfigManager.load_config().get('Trigger', {})
+
             # Вытаскиваем специфичные задержки для этого оружия из правильного узла JSON
-            trigger_settings = full_config.get('Trigger', {})
             weapon_settings = trigger_settings.get('WeaponSettings', {}).get(wt, {})
 
             # Заполняем текстовые поля ввода в GUI актуальными значениями
@@ -558,6 +601,8 @@ class MainWindow:
     def update_ui_from_config(self):
         """Обновляет элементы GUI из текущего конфига."""
         config = ConfigManager.load_config()
+        self._overlay_runtime_config = copy.deepcopy(config)
+        self._noflash_runtime_config = copy.deepcopy(config)
         settings = config.get("General", {})
         if hasattr(self, 'trigger_var'): self.trigger_var.set(settings["Trigger"])
         if hasattr(self, 'overlay_var'): self.overlay_var.set(settings["Overlay"])
@@ -572,7 +617,7 @@ class MainWindow:
         if hasattr(self, 'attack_teammates_var'): self.attack_teammates_var.set(t_settings["AttackOnTeammates"])
         if hasattr(self, 'active_weapon_type'):
             self.active_weapon_type.set(t_settings.get('active_weapon_type', 'Rifles'))
-            self.update_weapon_settings_display()
+            self.update_weapon_settings_display(t_settings)
 
         bh_settings = config.get("Bunnyhop", {})
         if hasattr(self, 'jump_key_entry'):
@@ -634,7 +679,7 @@ class MainWindow:
                     size = os.path.getsize(log_path)
                     position = getattr(self, 'last_log_position', 0) or 0
                     if size < position:
-                        position = 0
+                        position = max(0, size - 1_048_576)
                     if size <= position:
                         continue
                     with open(log_path, 'rb') as f:
@@ -670,6 +715,10 @@ class MainWindow:
                     text += "\n"
                 self.log_text.configure(state="normal")
                 self.log_text.insert("end", text)
+                line_count = int(self.log_text.index("end-1c").split(".")[0])
+                if line_count > LOG_DISPLAY_MAX_LINES:
+                    first_line_to_keep = line_count - LOG_DISPLAY_MAX_LINES + 1
+                    self.log_text.delete("1.0", f"{first_line_to_keep}.0")
                 self.log_text.see("end")
                 self.log_text.configure(state="disabled")
         except Exception:
@@ -687,20 +736,51 @@ class MainWindow:
     def cleanup(self):
         """Очищает занятые потоки и таймеры перед выходом."""
         try:
-            self.stop_client()
+            threads_stopped = self.client_manager.stop_client()
+            if not threads_stopped:
+                logger.warning(
+                    "Дескриптор pymem оставлен открытым: рабочие потоки ещё завершаются."
+                )
             if self.config_handler:
                 self.config_handler.cancel()
+                self.config_handler = None
             if hasattr(self, 'observer') and self.observer:
                 self.observer.stop()
                 self.observer.join()
             if self.log_timer:
                 self.root.after_cancel(self.log_timer)
                 self.log_timer = None
+            if self._update_timer is not None:
+                self.root.after_cancel(self._update_timer)
+                self._update_timer = None
+            overlay_timers = getattr(self, "_overlay_save_timers", {})
+            for timer in overlay_timers.values():
+                self.root.after_cancel(timer)
+            overlay_timers.clear()
+            pending_overlay = getattr(self, "_overlay_pending_values", {})
+            for key, value in list(pending_overlay.items()):
+                if ConfigManager.set_value("Overlay", key, value=value):
+                    pending_overlay.pop(key, None)
+                else:
+                    logger.error("Не удалось сохранить параметр Overlay.%s при закрытии", key)
+
+            timer = getattr(self, "_noflash_save_timer", None)
+            if timer is not None:
+                self.root.after_cancel(timer)
+                self._noflash_save_timer = None
+            pending_noflash = getattr(self, "_noflash_pending_value", None)
+            if pending_noflash is not None:
+                key, value = pending_noflash
+                if ConfigManager.set_value("NoFlash", key, value=value):
+                    self._noflash_pending_value = None
+                else:
+                    logger.error("Не удалось сохранить параметр NoFlash.%s при закрытии", key)
             self.log_stop_event.set()
             if self.log_worker and self.log_worker.is_alive():
                 self.log_worker.join(timeout=1.5)
         except Exception:
-            pass
+            logger.exception("Ошибка при очистке ресурсов главного окна.")
+
 
 if __name__ == "__main__":
     # Безопасно инициализируем и запускаем логгер проекта перед стартом GUI

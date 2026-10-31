@@ -105,10 +105,12 @@ class CS2Bunnyhop:
                                         f"Bunnyhop: прыжок (flags={flags:#x}, "
                                         f"forcejump={used_force})"
                                     )
-                    time.sleep(0.005)  # 200 Hz достаточно для 128 tick servers
+                    if self.stop_event.wait(0.005):
+                        break
                 except Exception as e:
                     logger.debug(f"Ошибка в цикле Bunnyhop: {e}")
-                    time.sleep(0.1)
+                    if self.stop_event.wait(0.1):
+                        break
         finally:
             self.is_running = False
             logger.debug("Bunnyhop остановлен.")

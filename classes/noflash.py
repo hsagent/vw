@@ -1,6 +1,5 @@
 import threading
-import time
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, Optional
 
 from classes.config_manager import ConfigManager
 from classes.memory_manager import MemoryManager
@@ -75,9 +74,7 @@ class CS2NoFlash:
         self.stop_event.clear()
 
         is_game_active = Utility.is_game_active
-        sleep = time.sleep
         read_longlong = self.memory_manager.read_longlong
-        read_float = self.memory_manager.pm.read_float if hasattr(self.memory_manager, 'pm') else None
         
         local_player_addr = self.local_player_address
         dur_offset = self.flash_duration_offset
@@ -93,7 +90,8 @@ class CS2NoFlash:
         while not self.stop_event.is_set():
             try:
                 if not is_game_active():
-                    sleep(0.1)
+                    if self.stop_event.wait(0.1):
+                        break
                     logged_waiting = False
                     continue
 
@@ -134,16 +132,19 @@ class CS2NoFlash:
                             dur_offset = self.flash_duration_offset
                             alpha_offset = self.flash_max_alpha_offset
                         failed_reads = 0
-                        sleep(reinit_backoff)
+                        if self.stop_event.wait(reinit_backoff):
+                            break
                         reinit_backoff = min(reinit_backoff * 2, 2.0)
                         continue
 
-                sleep(NOFLASH_LOOP_SLEEP)
+                if self.stop_event.wait(NOFLASH_LOOP_SLEEP):
+                    break
 
             except Exception as e:
                 logger.error(f"Непредвиденная ошибка в цикле NoFlash: {e}")
                 failed_reads += 1
-                sleep(NOFLASH_LOOP_SLEEP)
+                if self.stop_event.wait(NOFLASH_LOOP_SLEEP):
+                    break
 
     def stop(self) -> None:
         """Останавливает работу модуля NoFlash."""

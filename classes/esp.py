@@ -216,8 +216,9 @@ class CS2Overlay:
         self.is_running = False
         self.stop_event = threading.Event()
         self.local_team = None
-        self.screen_width = overlay.get_screen_width()
-        self.screen_height = overlay.get_screen_height()
+        # Native screen queries belong to the worker after overlay initialization.
+        self.screen_width = 0
+        self.screen_height = 0
         self._color_cache: Dict[str, object] = {}
         # Индексы контроллеров вне стандартных 1..ENTITY_COUNT (если сервер
         # выдал игрокам более высокие слоты) и время последнего поиска.
@@ -430,23 +431,25 @@ class CS2Overlay:
 
     def start(self) -> None:
         """Запускает поток отрисовки Overlay."""
+        # ClientManager resets cancellation before spawning the worker.
         self.is_running = True
-        self.stop_event.clear()
+        overlay_initialized = False
 
         try:
-            overlay.overlay_init("Counter-Strike 2", fps=0)
-            self.screen_width = overlay.get_screen_width()
-            self.screen_height = overlay.get_screen_height()
-            Colors.init_colors()
-        except Exception as e:
-            logger.error(f"Ошибка инициализации pyMeow оверлея: {e}")
-            self.is_running = False
-            return
+            if self.stop_event.is_set():
+                return
 
-        frame_time = 1.0 / self.target_fps
-        is_game_active = Utility.is_game_active
+            try:
+                overlay.overlay_init("Counter-Strike 2", fps=0)
+                overlay_initialized = True
+                self.screen_width = overlay.get_screen_width()
+                self.screen_height = overlay.get_screen_height()
+                Colors.init_colors()
+            except Exception:
+                logger.exception("Ошибка инициализации pyMeow оверлея.")
+                return
 
-        try:
+            is_game_active = Utility.is_game_active
             while not self.stop_event.is_set():
                 start_time = time.time()
                 try:
@@ -455,14 +458,16 @@ class CS2Overlay:
                         break
 
                     if not is_game_active():
-                        time.sleep(0.1)
+                        if self.stop_event.wait(0.1):
+                            break
                         continue
 
                     view_matrix = self.memory_manager.read_floats(
                         self.memory_manager.client_base + self.memory_manager.dwViewMatrix, 16
                     )
                     if len(view_matrix) != 16:
-                        time.sleep(MAIN_LOOP_SLEEP)
+                        if self.stop_event.wait(MAIN_LOOP_SLEEP):
+                            break
                         continue
 
                     local_controller = self.memory_manager.read_longlong(
@@ -514,28 +519,32 @@ class CS2Overlay:
                                 if is_teammate and not self.draw_teammates:
                                     continue
                                 self.draw_entity(entity, view_matrix, is_teammate)
-                        except Exception as e:
-                            logger.error(f"Ошибка рендеринга сущностей: {e}")
+                        except Exception:
+                            logger.exception("Ошибка рендеринга сущностей.")
                         finally:
                             # end_drawing обязан вызываться всегда, иначе кадр raylib остаётся незавершённым
                             overlay.end_drawing()
-                    except Exception as e:
-                        logger.error(f"Критическая ошибка begin_drawing: {e}")
+                    except Exception:
+                        logger.exception("Критическая ошибка отрисовки кадра pyMeow.")
 
                     elapsed = time.time() - start_time
+                    frame_time = 1.0 / max(1, self.target_fps)
                     sleep_time = frame_time - elapsed
-                    if sleep_time > 0:
-                        time.sleep(sleep_time)
-                except Exception as e:
-                    logger.error(f"Ошибка в основном цикле оверлея pyMeow: {e}")
-                    time.sleep(MAIN_LOOP_SLEEP)
+                    if sleep_time > 0 and self.stop_event.wait(sleep_time):
+                        break
+                except Exception:
+                    logger.exception("Ошибка в основном цикле оверлея pyMeow.")
+                    if self.stop_event.wait(MAIN_LOOP_SLEEP):
+                        break
         finally:
-            try:
-                overlay.overlay_close()
-            except Exception:
-                pass
+            if overlay_initialized:
+                try:
+                    overlay.overlay_close()
+                except Exception:
+                    logger.exception("Ошибка при закрытии pyMeow оверлея.")
+                else:
+                    logger.debug("Оверлей успешно закрыт и очищен.")
             self.is_running = False
-            logger.debug("Оверлей успешно закрыт и очищен.")
 
     def stop(self) -> None:
         """Останавливает работу оверлея."""

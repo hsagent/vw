@@ -1,6 +1,7 @@
 import pymem
 import pymem.process
 import struct
+import threading
 import time
 from typing import Dict, Any, Optional
 
@@ -13,6 +14,8 @@ logger = Logger.get_logger(__name__)
 ENTITY_INDEX_MASK = 0x7FFF  # Маска для извлечения индекса из handle
 ENTITY_CHUNK_SHIFT = 9  # Сдвиг для вычисления chunk index
 ENTITY_CHUNK_SIZE = 0x1FF  # Размер chunk для entity list
+ENTITY_LIST_READ_ATTEMPTS = 5
+ENTITY_LIST_READ_DELAY = 0.25
 
 class MemoryManager:
     def __init__(self, offsets: dict = None, client_data: dict = None, buttons_data: dict = None) -> None:
@@ -54,19 +57,57 @@ class MemoryManager:
         # Кэш для weapon type (оружие меняется редко, не нужно читать каждый кадр)
         self._weapon_cache = {"name": "", "type": "", "timestamp": 0.0}
         self._weapon_cache_ttl = 0.5  # Время жизни кэша в секундах
+        self._connection_lock = threading.Lock()
+        self._last_entity_list_error = None
 
     def initialize(self) -> bool:
-        if not updater.offsets:
-            if not updater.fetch_offsets():
-                logger.error("Не удалось получить актуальные оффсеты.")
-                return False
+        with self._connection_lock:
+            return self._initialize_locked()
+
+    def _initialize_locked(self) -> bool:
+        if not updater.load_configured_offsets():
+            logger.error("Не удалось загрузить оффсеты из выбранного источника.")
+            return False
         if not self.initialize_pymem() or not self.get_client_module():
+            self._close_process_locked()
             return False
         self.load_offsets()
-        if self.dwEntityList == 0:
-            logger.error("Критическая ошибка: dwEntityList равен 0.")
+        if not all((
+            self.dwEntityList,
+            self.dwLocalPlayerPawn,
+            self.dwLocalPlayerController,
+            self.dwViewMatrix,
+        )):
+            logger.error("Критические базовые offsets отсутствуют или равны 0.")
+            self._close_process_locked()
             return False
-        self.ent_list = self.read_longlong(self.client_base + self.dwEntityList)
+        self.ent_list = self._read_entity_list_pointer()
+        if not self.ent_list and getattr(updater, "_loaded_source", None) == "a2x":
+            logger.warning(
+                "dwEntityList недоступен; выполняется одно принудительное обновление a2x offsets."
+            )
+            if updater.load_configured_offsets(force_reload=True):
+                self.load_offsets()
+                self.ent_list = self._read_entity_list_pointer()
+
+        if not self.ent_list:
+            logger.error(
+                "Не удалось прочитать dwEntityList после %d попыток "
+                "(client.dll=%#x, offset=%#x, address=%#x, source=%s). "
+                "Возможны устаревшие offsets после обновления CS2 или игра ещё не загрузила карту.",
+                ENTITY_LIST_READ_ATTEMPTS,
+                self.client_base,
+                self.dwEntityList,
+                self.client_base + self.dwEntityList,
+                getattr(updater, "_loaded_source", None) or "unknown",
+            )
+            if self._last_entity_list_error is not None:
+                logger.error(
+                    "Последняя ошибка чтения dwEntityList: %s",
+                    self._last_entity_list_error,
+                )
+            self._close_process_locked()
+            return False
         self._ent_list_ts = time.monotonic()
         if not self._stride_detected:
             self.detect_entity_entry_size()
@@ -74,6 +115,9 @@ class MemoryManager:
         return True
 
     def initialize_pymem(self) -> bool:
+        if self.pm is not None and getattr(self.pm, "process_handle", None):
+            return True
+        self._close_process_locked()
         # OpenProcess может кратковременно вернуть отказ, пока игра грузится,
         # пока античит инициализируется или пока антивирус проверяет процесс.
         # Поэтому пробуем несколько раз, а не сдаёмся после первой ошибки.
@@ -106,6 +150,28 @@ class MemoryManager:
             last_error,
         )
         return False
+
+    def _close_process_locked(self) -> None:
+        """Закрывает текущий handle pymem и сбрасывает зависящие указатели."""
+        pm = self.pm
+        self.pm = None
+        self.client_base = None
+        self.ent_list = None
+        self._ent_list_ts = 0.0
+        self._stride_detected = False
+        self._last_entity_list_error = None
+        if pm is None:
+            return
+        try:
+            pm.close_process()
+            logger.debug("Соединение pymem с cs2.exe закрыто.")
+        except Exception as e:
+            logger.warning("Не удалось закрыть handle cs2.exe: %s", e)
+
+    def close(self) -> None:
+        """Потокобезопасно освобождает дескриптор процесса CS2."""
+        with self._connection_lock:
+            self._close_process_locked()
 
     def get_client_module(self) -> bool:
         try:
@@ -179,12 +245,32 @@ class MemoryManager:
             self.m_flFlashDuration, self.m_pBoneArray,
         )
 
+    def _read_entity_list_pointer(self) -> int:
+        """Читает dwEntityList с коротким ожиданием загрузки карты."""
+        address = self.client_base + self.dwEntityList
+        self._last_entity_list_error = None
+        for attempt in range(ENTITY_LIST_READ_ATTEMPTS):
+            pointer, error = self._read_longlong_with_error(address)
+            if pointer:
+                return pointer
+            if error is not None:
+                self._last_entity_list_error = error
+            if attempt + 1 < ENTITY_LIST_READ_ATTEMPTS:
+                time.sleep(ENTITY_LIST_READ_DELAY)
+        return 0
+
     def _ensure_ent_list(self) -> None:
         """Обновляет указатель entity list не чаще раза в 2 секунды."""
         now = time.monotonic()
         if not self.ent_list or now - self._ent_list_ts > 2.0:
-            self.ent_list = self.read_longlong(self.client_base + self.dwEntityList)
+            previous_pointer = self.ent_list
+            self.ent_list = self.read_longlong(
+                self.client_base + self.dwEntityList
+            )
             self._ent_list_ts = now
+            if self.ent_list and not previous_pointer and not self._stride_detected:
+                self.detect_entity_entry_size()
+                self._stride_detected = True
 
     def _read_entity_raw(self, index: int, entry_size: int) -> int:
         """Чтение указателя сущности с явно заданным размером записи."""
@@ -439,6 +525,15 @@ class MemoryManager:
             return self.pm.read_longlong(address)
         except Exception:
             return 0
+
+    def _read_longlong_with_error(self, address: int):
+        """Читает указатель и сохраняет причину ошибки для стартовой диагностики."""
+        if not self.pm:
+            return 0, RuntimeError("pymem handle отсутствует")
+        try:
+            return self.pm.read_longlong(address), None
+        except Exception as error:
+            return 0, error
 
     @property
     def client_dll_base(self) -> int: 
