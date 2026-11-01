@@ -15,20 +15,13 @@
   },
   {
     "number": "3",
-    "title": "My Project Update (Hotfix)",
-    "url": "https://github.com/hsagent/vw/releases/tag/v1.2.7",
-    "timestamp": "2025-08-06",
-    "message": "My Project has been updated to version 1.2.7. This release includes various bug fixes and performance improvements."
-  },
-  {
-    "number": "4",
     "title": "VACNet Anti-Cheat Update Warning",
     "url": "https://github.com/hsagent/vw?tab=readme-ov-file#disclaimer",
     "timestamp": "2025-09-26",
     "message": "VACNet, the anti-cheat system for Counter-Strike 2, has been significantly improved. Using My Project or similar tools may result in detection and bans. Proceed with caution and use at your own risk."
   },
   {
-    "number": "5",
+    "number": "4",
     "title": "Important VACNet Anti-Cheat Update Notice",
     "url": "https://github.com/hsagent/vw/issues/119",
     "timestamp": "2025-10-03",
