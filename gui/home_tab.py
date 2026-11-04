@@ -279,7 +279,12 @@ def fetch_last_update(main_window):
     def update_callback():
         max_retries = 3
         retry_delay = 5  # seconds
-        cache_file = Path(ConfigManager.CONFIG_DIRECTORY) / "last_update_cache.txt"
+        config = ConfigManager.load_config()
+        offset_source = config.get("General", {}).get("OffsetSource", "a2x")
+        offset_sources = Utility.load_offset_sources()
+        cache_source = offset_source if offset_source == "local" or offset_source in offset_sources else "unknown"
+        cache_name = "last_update_cache.txt" if cache_source == "a2x" else f"last_update_cache_{cache_source}.txt"
+        cache_file = Path(ConfigManager.CONFIG_DIRECTORY) / cache_name
 
         def load_cached_timestamp():
             try:
@@ -306,19 +311,11 @@ def fetch_last_update(main_window):
             except Exception as e:
                 pass
 
-        def load_offset_sources():
-            """Load available offset sources from remote or fallback to defaults."""
-            return Utility.load_offset_sources()
-
         # Try loading cached timestamp first
         cached_timestamp = load_cached_timestamp()
         if cached_timestamp:
             logger.debug("Using cached timestamp: %s", cached_timestamp)
             update_ui(cached_timestamp, "#22c55e")
-
-        # Load config to determine offset source
-        config = ConfigManager.load_config()
-        offset_source = config.get("General", {}).get("OffsetSource", "a2x")
 
         # Handle local files case
         if offset_source == "local":
@@ -341,15 +338,13 @@ def fetch_last_update(main_window):
                 update_ui("Error", "#ef4444")
             return
 
-        # Load offset sources to get repository information
-        offset_sources = load_offset_sources()
-        
         if offset_source not in offset_sources:
             logger.error("Unknown offset source: %s", offset_source)
             update_ui("Unknown Source", "#ef4444")
             return
 
-        repository = offset_sources[offset_source].get("repository", "a2x/cs2-dumper")
+        source_config = offset_sources[offset_source]
+        repository = source_config["repository"]
         
         # Set up headers for GitHub API
         github_token = config.get("GitHub", {}).get("AccessToken", None)
@@ -364,11 +359,22 @@ def fetch_last_update(main_window):
         # Fetch from GitHub API
         for attempt in range(max_retries):
             try:
-                api_url = f"https://api.github.com/repos/{repository}/commits/main"
-                response = requests.get(api_url, headers=headers, timeout=10)
+                api_url = f"https://api.github.com/repos/{repository}/commits"
+                response = requests.get(
+                    api_url,
+                    params={
+                        "sha": source_config["branch"],
+                        "path": source_config["offsets_path"],
+                        "per_page": 1,
+                    },
+                    headers=headers,
+                    timeout=10,
+                )
                 response.raise_for_status()
-                commit_data = orjson.loads(response.content)
-                commit_timestamp = commit_data["commit"]["committer"]["date"]
+                commits = orjson.loads(response.content)
+                if not commits:
+                    raise ValueError("No commits found for the offsets file")
+                commit_timestamp = commits[0]["commit"]["committer"]["date"]
 
                 # Parse and format the timestamp
                 last_update_dt = parse_date(commit_timestamp)
@@ -497,4 +503,3 @@ def fetch_cs2_latest_patch(main_window):
 
     # Run fetch in a separate thread
     threading.Thread(target=patch_callback, daemon=True).start()
-

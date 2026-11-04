@@ -6,7 +6,7 @@ import time
 from typing import Dict, Any, Optional
 
 from classes.logger import Logger
-from src.offsets import updater
+from src.offsets import OFFSET_SOURCES, updater
 
 logger = Logger.get_logger(__name__)
 
@@ -93,9 +93,10 @@ class MemoryManager:
             self._close_process_locked()
             return False
         self.ent_list = self._read_entity_list_pointer()
-        if not self.ent_list and getattr(updater, "_loaded_source", None) == "a2x":
+        if not self.ent_list and getattr(updater, "_loaded_source", None) in OFFSET_SOURCES:
             logger.warning(
-                "dwEntityList недоступен; выполняется одно принудительное обновление a2x offsets."
+                "dwEntityList недоступен; выполняется одно принудительное обновление offsets источника %s.",
+                updater._loaded_source,
             )
             if updater.load_configured_offsets(force_reload=True):
                 self.load_offsets()

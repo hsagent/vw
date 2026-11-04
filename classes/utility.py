@@ -9,18 +9,10 @@ from pathlib import Path
 
 from classes.config_manager import ConfigManager, COLOR_CHOICES
 from classes.logger import Logger
+from src.offsets import OFFSET_SOURCES
 
 # Инициализация логгера
 logger = Logger.get_logger(__name__)
-
-OFFSET_SOURCES = {
-    "a2x": {
-        "name": "A2X Source", "author": "a2x", "repository": "a2x/cs2-dumper",
-        "offsets_url": "https://raw.githubusercontent.com/a2x/cs2-dumper/main/output/offsets.json",
-        "client_dll_url": "https://raw.githubusercontent.com/a2x/cs2-dumper/main/output/client_dll.json",
-        "buttons_url": "https://raw.githubusercontent.com/a2x/cs2-dumper/main/output/buttons.json"
-    }
-}
 
 # Кэш для транслитерации (ускоряет повторную обработку одинаковых никнеймов)
 _transliteration_cache = {}

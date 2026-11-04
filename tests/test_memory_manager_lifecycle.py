@@ -158,45 +158,38 @@ class MemoryManagerLifecycleTests(unittest.TestCase):
         self.assertEqual(sleep_mock.call_count, 2)
         self.assertIsInstance(manager._last_entity_list_error, OSError)
 
-    def test_initialize_force_refreshes_a2x_after_entity_list_failure(self):
-        manager = MemoryManager()
-        manager.pm = FakePymem()
-        manager.client_base = 0x100000
-        manager.dwEntityList = 0x200
-        manager.dwLocalPlayerPawn = 0x300
-        manager.dwLocalPlayerController = 0x400
-        manager.dwViewMatrix = 0x500
+    def test_initialize_force_refreshes_selected_network_source_after_entity_list_failure(self):
+        for source in ("a2x", "ivtim", "hanstxx", "cesiumoq"):
+            with self.subTest(source=source):
+                manager = MemoryManager()
+                manager.pm = FakePymem()
+                manager.client_base = 0x100000
+                manager.dwEntityList = 0x200
+                manager.dwLocalPlayerPawn = 0x300
+                manager.dwLocalPlayerController = 0x400
+                manager.dwViewMatrix = 0x500
 
-        with patch(
-            "classes.memory_manager.updater.load_configured_offsets",
-            side_effect=[True, True],
-        ) as load_mock, patch.object(
-            manager,
-            "initialize_pymem",
-            return_value=True,
-        ), patch.object(
-            manager,
-            "get_client_module",
-            return_value=True,
-        ), patch.object(
-            manager,
-            "load_offsets",
-        ), patch.object(
-            manager,
-            "_read_entity_list_pointer",
-            side_effect=[0, 0xABCDEF],
-        ), patch.object(
-            manager,
-            "detect_entity_entry_size",
-        ), patch.object(
-            __import__("classes.memory_manager", fromlist=["updater"]).updater,
-            "_loaded_source",
-            "a2x",
-        ):
-            self.assertTrue(manager.initialize())
+                with patch(
+                    "classes.memory_manager.updater.load_configured_offsets",
+                    side_effect=[True, True],
+                ) as load_mock, patch.object(
+                    manager, "initialize_pymem", return_value=True,
+                ), patch.object(
+                    manager, "get_client_module", return_value=True,
+                ), patch.object(
+                    manager, "load_offsets",
+                ), patch.object(
+                    manager, "_read_entity_list_pointer", side_effect=[0, 0xABCDEF],
+                ), patch.object(
+                    manager, "detect_entity_entry_size",
+                ), patch.object(
+                    __import__("classes.memory_manager", fromlist=["updater"]).updater,
+                    "_loaded_source", source,
+                ):
+                    self.assertTrue(manager.initialize())
 
-        self.assertEqual(load_mock.call_args_list[1].kwargs, {"force_reload": True})
-        self.assertEqual(manager.ent_list, 0xABCDEF)
+                self.assertEqual(load_mock.call_args_list[1].kwargs, {"force_reload": True})
+                self.assertEqual(manager.ent_list, 0xABCDEF)
 
     def test_entity_list_pointer_preserves_last_read_error(self):
         manager = MemoryManager()

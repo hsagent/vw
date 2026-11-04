@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 from tkinter import filedialog, messagebox
 from classes.config_manager import ConfigManager
-from src.offsets import updater
+from src.offsets import OFFSET_SOURCES, updater
 from gui.theme import (
     FONT_TITLE, FONT_SUBTITLE, FONT_SECTION_TITLE, FONT_SECTION_DESCRIPTION,
     FONT_ITEM_LABEL, FONT_ITEM_DESCRIPTION, FONT_WIDGET,
@@ -161,11 +161,11 @@ def create_offsets_section(main_window, parent, general_config):
 
     header = create_section_header(section, "📡  Offsets Configuration", "Configure offset source and local files")
 
-    # Переведено на стабильный локальный маппинг дамперов под CS2, чтобы GUI никогда не зависал
     source_mapping = {
-        "A2X Авто-Дампер (Рекомендуется)": "a2x",
-        "Локальные файлы конфигурации (.json)": "local"
+        f"{source['name']} ({source['author']})": source_id
+        for source_id, source in OFFSET_SOURCES.items()
     }
+    source_mapping["Локальные файлы конфигурации (.json)"] = "local"
     
     main_window.offset_source_mapping = source_mapping
     dropdown_values = list(source_mapping.keys())
@@ -280,9 +280,12 @@ def update_offset_source(main_window, selected_source_id):
                 + "\n".join(missing),
             )
             current_display = next(
-                name
-                for name, source_id in main_window.offset_source_mapping.items()
-                if source_id == "a2x"
+                (
+                    name
+                    for name, source_id in main_window.offset_source_mapping.items()
+                    if source_id == general.get("OffsetSource", "a2x")
+                ),
+                next(iter(main_window.offset_source_mapping)),
             )
             main_window.offset_source_var.set(current_display)
             return

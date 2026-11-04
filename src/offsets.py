@@ -10,27 +10,64 @@ from classes.logger import Logger
 
 logger = Logger.get_logger(__name__)
 
+OFFSET_SOURCES = {
+    "a2x": {
+        "name": "A2X Source", "author": "a2x", "repository": "a2x/cs2-dumper",
+        "branch": "main", "offsets_path": "output/offsets.json",
+        "offsets_url": "https://raw.githubusercontent.com/a2x/cs2-dumper/main/output/offsets.json",
+        "client_dll_url": "https://raw.githubusercontent.com/a2x/cs2-dumper/main/output/client_dll.json",
+        "buttons_url": "https://raw.githubusercontent.com/a2x/cs2-dumper/main/output/buttons.json",
+    },
+    "ivtim": {
+        "name": "CS2 Dumper", "author": "ivtim", "repository": "ivtim/cs2-dumper",
+        "branch": "main", "offsets_path": "output/offsets.json",
+        "offsets_url": "https://raw.githubusercontent.com/ivtim/cs2-dumper/main/output/offsets.json",
+        "client_dll_url": "https://raw.githubusercontent.com/ivtim/cs2-dumper/main/output/client_dll.json",
+        "buttons_url": "https://raw.githubusercontent.com/ivtim/cs2-dumper/main/output/buttons.json",
+    },
+    "hanstxx": {
+        "name": "CS2 Dumper", "author": "HansTxx", "repository": "HansTxx/cs2-dumper",
+        "branch": "master", "offsets_path": "output/offsets.json",
+        "offsets_url": "https://raw.githubusercontent.com/HansTxx/cs2-dumper/master/output/offsets.json",
+        "client_dll_url": "https://raw.githubusercontent.com/HansTxx/cs2-dumper/master/output/client_dll.json",
+        "buttons_url": "https://raw.githubusercontent.com/HansTxx/cs2-dumper/master/output/buttons.json",
+    },
+    "cesiumoq": {
+        "name": "CS2 Dumper (raw, preview)", "author": "cesiumoq", "repository": "cesiumoq/cs2-dumper",
+        "branch": "main", "offsets_path": "output/build-14195/raw/offsets.json",
+        "offsets_url": "https://raw.githubusercontent.com/cesiumoq/cs2-dumper/main/output/build-14195/raw/offsets.json",
+        "client_dll_url": "https://raw.githubusercontent.com/cesiumoq/cs2-dumper/main/output/build-14195/raw/client_dll.json",
+        "buttons_url": "https://raw.githubusercontent.com/cesiumoq/cs2-dumper/main/output/build-14195/raw/buttons.json",
+    },
+}
+
+
 class OffsetManager:
     def __init__(self, source_name="a2x", config_path="sources.json"):
         self.source_name = source_name
         self.config_path = config_path
         
-        # Ссылки на репозиторий дампера a2x
-        self.urls = {
-            "offsets": "https://raw.githubusercontent.com/a2x/cs2-dumper/main/output/offsets.json",
-            "client": "https://raw.githubusercontent.com/a2x/cs2-dumper/main/output/client_dll.json",
-            "buttons": "https://raw.githubusercontent.com/a2x/cs2-dumper/main/output/buttons.json"
-        }
+        self.urls = {}
         
         self.offsets = {}
         self.client = {}
         self.buttons = {}
         self._loaded_source = None
-        self._fetch_lock = threading.Lock()
+        self._fetch_lock = threading.RLock()
         self._load_urls_from_config()
 
     def _load_urls_from_config(self):
         """Загружает ссылки на репозитории из файла конфигурации источников."""
+        source = OFFSET_SOURCES.get(self.source_name, {})
+        self.urls = {
+            name: source[key]
+            for name, key in (
+                ("offsets", "offsets_url"),
+                ("client", "client_dll_url"),
+                ("buttons", "buttons_url"),
+            )
+            if key in source
+        }
         if not os.path.exists(self.config_path):
             return
         try:
@@ -38,11 +75,26 @@ class OffsetManager:
                 config_data = json.load(f)
             if self.source_name in config_data:
                 src = config_data[self.source_name]
-                self.urls["offsets"] = src["offsets_url"]
-                self.urls["client"] = src["client_dll_url"]
-                self.urls["buttons"] = src["buttons_url"]
+                urls = {
+                    "offsets": src["offsets_url"],
+                    "client": src["client_dll_url"],
+                    "buttons": src["buttons_url"],
+                }
+                if all(isinstance(url, str) and url for url in urls.values()):
+                    self.urls = urls
         except Exception:
             pass
+
+    def _clear_snapshot(self):
+        self.offsets, self.client, self.buttons = {}, {}, {}
+        self._loaded_source = None
+
+    def _cache_directory(self):
+        if self.source_name not in OFFSET_SOURCES:
+            raise ValueError("Unknown offset source")
+        cache_dir = Path(ConfigManager.OFFSETS_DIRECTORY)
+        return cache_dir if self.source_name == "a2x" else cache_dir / self.source_name
+
     def invalidate(self) -> None:
         """Помечает текущий снимок устаревшим после изменения GUI-настроек."""
         with self._fetch_lock:
@@ -55,34 +107,29 @@ class OffsetManager:
     def _fetch_offsets_locked(self) -> bool:
         """Скачивает актуальные оффсеты и принудительно сохраняет их в папку AppData."""
         try:
-            print("[Offsets] Загрузка актуальных смещений с серверов дампера...")
+            print(f"[Offsets] Загрузка смещений из источника {self.source_name}...")
             with ThreadPoolExecutor(max_workers=3) as pool:
                 responses = list(pool.map(
                     lambda url: requests.get(url, timeout=10, verify=True),
-                    self.urls.values()
+                    (self.urls[name] for name in ("offsets", "client", "buttons"))
                 ))
             if all(response.ok for response in responses):
                 offsets, client, buttons = (response.json() for response in responses)
                 if not self._validate_payloads(offsets, client, buttons):
                     raise ValueError("Некорректная структура JSON оффсетов")
+                cache_dir = self._cache_directory()
+                cache_dir.mkdir(parents=True, exist_ok=True)
+                for filename, payload in (
+                    ("offsets.json", offsets),
+                    ("client_dll.json", client),
+                    ("buttons.json", buttons),
+                ):
+                    with (cache_dir / filename).open("w", encoding="utf-8") as file:
+                        json.dump(payload, file, indent=2)
+
                 self.offsets, self.client, self.buttons = offsets, client, buttons
-                self._loaded_source = "a2x"
-                
-                # Папка хранения — та же, что и у конфигурации приложения
-                appdata_target_dir = ConfigManager.OFFSETS_DIRECTORY
-                
-                # Гарантируем, что вся цепочка папок создана в системе
-                os.makedirs(appdata_target_dir, exist_ok=True)
-                
-                # Записываем три файла на жесткий диск
-                with open(os.path.join(appdata_target_dir, "offsets.json"), "w", encoding="utf-8") as f:
-                    json.dump(self.offsets, f, indent=2)
-                with open(os.path.join(appdata_target_dir, "client_dll.json"), "w", encoding="utf-8") as f:
-                    json.dump(self.client, f, indent=2)
-                with open(os.path.join(appdata_target_dir, "buttons.json"), "w", encoding="utf-8") as f:
-                    json.dump(self.buttons, f, indent=2)
-                    
-                print(f"[Offsets] Файлы успешно скачаны и сохранены в: {appdata_target_dir}")
+                self._loaded_source = self.source_name
+                print(f"[Offsets] Файлы успешно скачаны и сохранены в: {cache_dir}")
                 return True
             else:
                 print(f"[Offsets] Ошибка серверов GitHub. Коды: {', '.join(str(r.status_code) for r in responses)}")
@@ -133,18 +180,25 @@ class OffsetManager:
         with self._fetch_lock:
             config = ConfigManager.load_config()
             general = config.get("General", {})
-            source = general.get("OffsetSource", "a2x")
+            source = general.get("OffsetSource", self.source_name)
 
             if source == "local":
                 if not force_reload and self._loaded_source == "local" and self.offsets and self.client and self.buttons:
                     return True
                 return self._load_local_offsets_locked(general)
 
-            if source != "a2x":
+            if not isinstance(source, str) or source not in OFFSET_SOURCES:
+                self._clear_snapshot()
                 logger.error("[Offsets] Неизвестный источник: %s", source)
                 return False
 
-            if not force_reload and self._loaded_source == "a2x" and self.offsets and self.client and self.buttons:
+            if source != self.source_name:
+                self.source_name = source
+                self._load_urls_from_config()
+            if self._loaded_source != source:
+                self._clear_snapshot()
+
+            if not force_reload and self._loaded_source == source and self.offsets and self.client and self.buttons:
                 return True
             return self._fetch_offsets_locked()
 
@@ -180,33 +234,28 @@ class OffsetManager:
             )
             return True
         except (OSError, ValueError, json.JSONDecodeError) as e:
-            self.offsets = {}
-            self.client = {}
-            self.buttons = {}
-            self._loaded_source = None
+            self._clear_snapshot()
             logger.error("[Offsets] Не удалось загрузить локальные файлы: %s", e)
             return False
 
     def load_cached_offsets(self) -> bool:
         """Загружает ранее сохранённые оффсеты из AppData (работа без сети)."""
-        cache_dir = ConfigManager.OFFSETS_DIRECTORY
-        try:
-            with open(os.path.join(cache_dir, "offsets.json"), "r", encoding="utf-8") as f:
-                self.offsets = json.load(f)
-            with open(os.path.join(cache_dir, "client_dll.json"), "r", encoding="utf-8") as f:
-                self.client = json.load(f)
-            with open(os.path.join(cache_dir, "buttons.json"), "r", encoding="utf-8") as f:
-                self.buttons = json.load(f)
-            if self._validate_payloads(self.offsets, self.client, self.buttons):
-                self._loaded_source = "a2x"
-                print(f"[Offsets] Сеть недоступна — использован локальный кэш: {cache_dir}")
-                return True
-            self.offsets = {}
-            self.client = {}
-            self.buttons = {}
-        except Exception as e:
-            print(f"[Offsets] Локальный кэш смещений недоступен: {e}")
-        return False
+        with self._fetch_lock:
+            try:
+                cache_dir = self._cache_directory()
+                payloads = []
+                for filename in ("offsets.json", "client_dll.json", "buttons.json"):
+                    with (cache_dir / filename).open("r", encoding="utf-8-sig") as file:
+                        payloads.append(json.load(file))
+                if self._validate_payloads(*payloads):
+                    self.offsets, self.client, self.buttons = payloads
+                    self._loaded_source = self.source_name
+                    print(f"[Offsets] Сеть недоступна — использован локальный кэш: {cache_dir}")
+                    return True
+            except Exception as e:
+                print(f"[Offsets] Локальный кэш смещений недоступен: {e}")
+            self._clear_snapshot()
+            return False
     def get_offset(self, module: str, name: str) -> int:
         """Получает базовый оффсет (например, dwEntityList)."""
         try:
