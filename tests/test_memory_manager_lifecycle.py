@@ -1,4 +1,5 @@
 import time
+import struct
 import unittest
 from unittest.mock import patch
 
@@ -100,6 +101,7 @@ class IdentityAnchoredPymem(FakePymem):
             self.client_base + self.dw_pawn: self.pawn,
             self.controller + self.m_p_entity: self.controller_identity,
             self.pawn + self.m_p_entity: self.pawn_identity,
+            self.target + self.m_p_entity: self.chunk + self.target_index * self.entry_size,
             self.controller_identity: self.controller,
             self.pawn_identity: self.pawn,
             self.chunk + self.target_index * self.entry_size: self.target,
@@ -114,10 +116,85 @@ class IdentityAnchoredPymem(FakePymem):
             return 0x01A38001
         if address == self.pawn_identity + 0x10:
             return 0x01E5012F
+        if address == self.chunk + self.target_index * self.entry_size + 0x10:
+            return 0x01000000 | self.target_index
         return 0
 
 
+class DeathmatchPymem(IdentityAnchoredPymem):
+    def __init__(self, player_count=24):
+        super().__init__()
+        self.controller_indices = list(range(1, player_count + 1))
+        self.pawn_indices = [512 + index for index in self.controller_indices]
+        self.serials = [0x01000000] * player_count
+        self.handle_offset = 0x92C
+        self.rebuild()
+
+    def rebuild(self):
+        self.pointers = {
+            self.client_base + self.dw_entity_list: self.ent_list,
+        }
+        self.ints = {}
+        self.identities = {}
+        groups = []
+        for kind, indices in enumerate((self.controller_indices, self.pawn_indices)):
+            entries = []
+            for player, index in enumerate(indices):
+                entity = (0x400000 if kind == 0 else 0x600000) + player * 0x1000
+                chunk = 0x1000000 + (index >> 9) * 0x20000 + 8
+                identity = chunk + (index & 0x1FF) * self.entry_size
+                raw = self.serials[player] | index
+                self.pointers[identity] = entity
+                self.pointers[identity + 8] = 0x2000000 + kind * 0x1000
+                self.pointers[entity + self.m_p_entity] = identity
+                self.ints[identity + 0x10] = raw
+                entries.append((entity, identity, raw))
+            groups.append(entries)
+        for kind, entries in enumerate(groups):
+            for player, (entity, identity, raw) in enumerate(entries):
+                data = bytearray(112)
+                struct.pack_into("<QQI", data, 0, entity, 0x2000000 + kind * 0x1000, raw)
+                previous = entries[player - 1][1] if player else 0
+                following = entries[player + 1][1] if player + 1 < len(entries) else 0
+                struct.pack_into("<QQ", data, 0x60, previous, following)
+                self.identities[identity] = bytes(data)
+        for player, (controller, _, _) in enumerate(groups[0]):
+            self.ints[controller + self.handle_offset] = groups[1][player][2]
+        self.controller, self.controller_identity, _ = groups[0][0]
+        self.pawn, self.pawn_identity, _ = groups[1][0]
+        self.pointers[self.client_base + self.dw_controller] = self.controller
+        self.pointers[self.client_base + self.dw_pawn] = self.pawn
+
+    def read_longlong(self, address):
+        if address == self.ent_list + 0x10:
+            self.old_root_reads += 1
+            return 0xDEADBEEF
+        return self.pointers.get(address, 0)
+
+    def read_int(self, address):
+        value = self.ints.get(address, 0)
+        return value - 0x100000000 if value & 0x80000000 else value
+
+    def read_bytes(self, address, size):
+        return self.identities.get(address, b"\x00" * size)[:size]
+
+
 class MemoryManagerLifecycleTests(unittest.TestCase):
+    def _deathmatch_manager(self):
+        manager = MemoryManager()
+        manager.pm = DeathmatchPymem()
+        manager.client_base = manager.pm.client_base
+        manager.dwEntityList = manager.pm.dw_entity_list
+        manager.dwLocalPlayerController = manager.pm.dw_controller
+        manager.dwLocalPlayerPawn = manager.pm.dw_pawn
+        manager.m_pEntity = manager.pm.m_p_entity
+        manager.m_pPrevByClass = 0x60
+        manager.m_pNextByClass = 0x68
+        manager.m_hPlayerPawn = manager.pm.handle_offset
+        manager.ent_list = manager.pm.ent_list
+        manager._ent_list_ts = time.monotonic()
+        return manager
+
     def test_close_is_idempotent_and_resets_process_state(self):
         manager = MemoryManager()
         fake_pm = FakePymem()
@@ -289,6 +366,73 @@ class MemoryManagerLifecycleTests(unittest.TestCase):
 
         self.assertFalse(manager._stride_detected)
         self.assertEqual(manager._entity_chunks, {})
+
+    def test_more_than_sixteen_pawns_resolve_across_entity_chunks(self):
+        manager = self._deathmatch_manager()
+        self.assertEqual(manager.detect_entity_entry_size(), 112)
+        self.assertTrue(manager._stride_detected)
+        self.assertEqual(set(manager._entity_chunks), {0, 1})
+        self.assertEqual(len(manager.get_controller_indices(manager.pm.controller)), 24)
+        for player, index in enumerate(manager.pm.pawn_indices):
+            self.assertEqual(manager.get_entity(index), 0x600000 + player * 0x1000)
+        self.assertEqual(manager.pm.old_root_reads, 0)
+
+    def test_layout_validates_each_duplicate_candidate_only_once(self):
+        manager = self._deathmatch_manager()
+        with patch.object(
+            manager, "_identity_anchor_matches", wraps=manager._identity_anchor_matches,
+        ) as validate_mock:
+            self.assertEqual(manager.detect_entity_entry_size(), 112)
+        self.assertTrue(manager._stride_detected)
+        self.assertLessEqual(validate_mock.call_count, 2 * (len(manager.pm.controller_indices) + 1))
+
+    def test_incomplete_class_read_is_not_an_authoritative_roster(self):
+        manager = self._deathmatch_manager()
+        manager.detect_entity_entry_size()
+        original_read = manager.pm.read_bytes
+        failed_identity = next(identity for identity in manager.pm.identities if identity != manager.pm.controller_identity)
+
+        def read_bytes(address, size):
+            if address == failed_identity:
+                raise OSError("transient class identity read failure")
+            return original_read(address, size)
+
+        with patch.object(manager.pm, "read_bytes", side_effect=read_bytes):
+            self.assertIsNone(manager.get_controller_indices(manager.pm.controller))
+
+    def test_remote_respawn_discovers_new_chunk_without_legacy_root(self):
+        manager = self._deathmatch_manager()
+        manager.detect_entity_entry_size()
+        manager.pm.pawn_indices[1] = 1027
+        manager.pm.serials[1] = 0x02000000
+        manager.pm.rebuild()
+        handle = manager.pm.ints[0x401000 + manager.m_hPlayerPawn]
+        self.assertEqual(manager.get_entity_by_handle(handle), 0x601000)
+        self.assertIn(2, manager._entity_chunks)
+        self.assertEqual(manager.pm.old_root_reads, 0)
+
+    def test_local_respawn_rebuilds_layout_when_anchors_use_different_chunks(self):
+        manager = self._deathmatch_manager()
+        manager.detect_entity_entry_size()
+        manager.pm.pawn_indices[0] = 1027
+        manager.pm.rebuild()
+        manager._ent_list_ts = 0.0
+        manager._ensure_ent_list()
+        self.assertTrue(manager._stride_detected)
+        self.assertEqual(manager.local_pawn_index, 1027)
+        self.assertEqual(manager.get_entity(1027), manager.pm.pawn)
+        self.assertEqual(manager.get_entity(manager.pm.pawn_indices[1]), 0x601000)
+        self.assertEqual(manager.pm.old_root_reads, 0)
+
+    def test_recycled_index_rejects_stale_handle_serial(self):
+        manager = self._deathmatch_manager()
+        manager.detect_entity_entry_size()
+        old_handle = manager.pm.ints[0x401000 + manager.m_hPlayerPawn]
+        manager.pm.serials[1] = 0x02000000
+        manager.pm.rebuild()
+        new_handle = manager.pm.ints[0x401000 + manager.m_hPlayerPawn]
+        self.assertIsNone(manager.get_entity_by_handle(old_handle))
+        self.assertEqual(manager.get_entity_by_handle(new_handle), 0x601000)
 
     def test_stale_layout_generation_cannot_publish_identity_chunk(self):
         manager = MemoryManager()

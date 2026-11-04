@@ -1,6 +1,7 @@
 import threading
 import time
 import struct
+import os
 import pyMeow as overlay
 from typing import Iterator, Optional, Dict, Any
 
@@ -8,6 +9,11 @@ from classes.config_manager import ConfigManager, Colors
 from classes.memory_manager import MemoryManager
 from classes.logger import Logger
 from classes.utility import Utility
+
+if os.name == "nt":
+    import win32con
+    import win32gui
+    import win32process
 
 # Инициализация логгера
 logger = Logger.get_logger(__name__)
@@ -19,7 +25,7 @@ ENTITY_COUNT = 64
 
 # Максимальный индекс, до которого раз в 5 секунд ищем контроллеры игроков
 DISCOVERY_MAX_INDEX = 512
-DISCOVERY_INTERVAL = 5.0
+DISCOVERY_INTERVAL = 1.0
 
 HEAD_BONE = 6
 BONE_STRIDE = 32
@@ -119,6 +125,8 @@ class Entity:
                 self.pawn_ptr + self.memory_manager.m_iTeamNum
             )
             self.pos = self.memory_manager.read_vec3(self.pawn_ptr + self.memory_manager.m_vOldOrigin)
+            if game_scene and not (self.pos["x"] or self.pos["y"] or self.pos["z"]):
+                self.pos = self.memory_manager.read_vec3(game_scene + self.memory_manager.m_vecAbsOrigin)
             if not (self.pos["x"] or self.pos["y"] or self.pos["z"]):
                 return False
 
@@ -277,7 +285,7 @@ class CS2Overlay:
                 if pawn_index is None:
                     continue
 
-                pawn_ptr = self.memory_manager.get_entity(pawn_index)
+                pawn_ptr = self.memory_manager.get_entity_by_handle(pawn_handle)
                 if not pawn_ptr:
                     continue
 
@@ -288,8 +296,15 @@ class CS2Overlay:
                 continue
 
     def discover_extra_indices(self, local_controller_ptr: int) -> None:
-        """Редкий (раз в 5 с) поиск игроков за пределами слотов 1..64."""
-        found = set()
+        """Обновляет roster без отбрасывания умерших до их переспавна."""
+        controller_indices = self.memory_manager.get_controller_indices(local_controller_ptr)
+        if controller_indices is not None:
+            self._extra_indices = {index for index in controller_indices if index > ENTITY_COUNT}
+            return
+        found = {
+            index for index in self._extra_indices
+            if self.memory_manager.get_entity(index)
+        }
         for i in range(ENTITY_COUNT + 1, DISCOVERY_MAX_INDEX + 1):
             try:
                 controller_ptr = self.memory_manager.get_entity(i)
@@ -301,7 +316,7 @@ class CS2Overlay:
                 pawn_index = self.memory_manager.handle_to_index(pawn_handle)
                 if pawn_index is None:
                     continue
-                pawn_ptr = self.memory_manager.get_entity(pawn_index)
+                pawn_ptr = self.memory_manager.get_entity_by_handle(pawn_handle)
                 if not pawn_ptr:
                     continue
                 team = self.memory_manager.read_uint8(
@@ -436,6 +451,41 @@ class CS2Overlay:
         except Exception as e:
             logger.debug(f"Ошибка отрисовки сущности: {e}")
 
+    def _configure_passive_window(self) -> None:
+        if os.name != "nt":
+            return
+        hwnd = int(overlay.get_window_handle())
+        if not hwnd or not win32gui.IsWindow(hwnd):
+            raise RuntimeError("Invalid overlay window handle")
+        thread_id, process_id = win32process.GetWindowThreadProcessId(hwnd)
+        if process_id != os.getpid() or thread_id != threading.get_native_id():
+            raise RuntimeError("Overlay window is not owned by this worker")
+        old_style = win32gui.GetWindowLong(hwnd, win32con.GWL_EXSTYLE)
+        required = win32con.WS_EX_NOACTIVATE | win32con.WS_EX_TOOLWINDOW
+        new_style = (old_style | required) & ~win32con.WS_EX_APPWINDOW
+        if new_style != old_style:
+            win32gui.SetWindowLong(hwnd, win32con.GWL_EXSTYLE, new_style)
+        actual_style = win32gui.GetWindowLong(hwnd, win32con.GWL_EXSTYLE)
+        if actual_style & required != required or actual_style & win32con.WS_EX_APPWINDOW:
+            raise RuntimeError("Overlay no-activation style was not applied")
+        flags = (
+            win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | win32con.SWP_NOZORDER
+            | win32con.SWP_NOOWNERZORDER | win32con.SWP_FRAMECHANGED | win32con.SWP_NOACTIVATE
+        )
+        win32gui.SetWindowPos(hwnd, 0, 0, 0, 0, 0, flags)
+        # Only relinquish focus if native initialization activated our own window.
+        if win32gui.GetForegroundWindow() == hwnd:
+            win32gui.ShowWindow(hwnd, win32con.SW_HIDE)
+            win32gui.ShowWindow(hwnd, win32con.SW_SHOWNA)
+
+    @staticmethod
+    def _draw_empty_frame() -> None:
+        overlay.begin_drawing()
+        try:
+            pass
+        finally:
+            overlay.end_drawing()
+
     def start(self) -> None:
         """Запускает поток отрисовки Overlay."""
         # ClientManager resets cancellation before spawning the worker.
@@ -452,6 +502,7 @@ class CS2Overlay:
                 self.screen_width = overlay.get_screen_width()
                 self.screen_height = overlay.get_screen_height()
                 Colors.init_colors()
+                self._configure_passive_window()
             except Exception:
                 logger.exception("Ошибка инициализации pyMeow оверлея.")
                 return
@@ -465,6 +516,7 @@ class CS2Overlay:
                         break
 
                     if not is_game_active():
+                        self._draw_empty_frame()
                         if self.stop_event.wait(0.1):
                             break
                         continue
@@ -473,6 +525,7 @@ class CS2Overlay:
                         self.memory_manager.client_base + self.memory_manager.dwViewMatrix, 16
                     )
                     if len(view_matrix) != 16:
+                        self._draw_empty_frame()
                         if self.stop_event.wait(MAIN_LOOP_SLEEP):
                             break
                         continue

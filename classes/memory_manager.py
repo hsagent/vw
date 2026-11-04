@@ -17,6 +17,9 @@ ENTITY_CHUNK_SIZE = 0x1FF  # Размер chunk для entity list
 ENTITY_IDENTITY_HANDLE_OFFSET = 0x10
 ENTITY_ENTRY_MIN_SIZE = 0x70
 ENTITY_ENTRY_MAX_SIZE = 0x100
+ENTITY_CLASS_SCAN_LIMIT = 256
+ENTITY_LAYOUT_REFRESH_INTERVAL = 0.25
+ENTITY_CHUNK_RETRY_INTERVAL = 0.5
 ENTITY_LIST_READ_ATTEMPTS = 5
 ENTITY_LIST_READ_DELAY = 0.25
 
@@ -39,6 +42,9 @@ class MemoryManager:
         self.m_vOldOrigin = None
         self.m_pGameSceneNode = None
         self.m_pEntity = None
+        self.m_pPrevByClass = None
+        self.m_pNextByClass = None
+        self.m_vecAbsOrigin = None
         self.m_bDormant = None
         self.m_hPlayerPawn = None
         self.m_flFlashDuration = None
@@ -56,7 +62,9 @@ class MemoryManager:
         self.entity_entry_size = 112
         self._stride_detected = False
         self._entity_chunks = {}
+        self._missing_chunk_attempts = {}
         self._layout_anchor_signature = (0, 0)
+        self._layout_identity_signature = ((0, 0), (0, 0))
         self.local_controller_index = None
         self.local_pawn_index = None
         # Указатель на entity list меняется при смене карты — обновляем его
@@ -173,14 +181,17 @@ class MemoryManager:
                 or self._entity_chunks
                 or self._stride_detected
                 or self._layout_anchor_signature != (0, 0)
+                or self._layout_identity_signature != ((0, 0), (0, 0))
             )
             self.pm = None
             self.client_base = None
             self.ent_list = None
             self._ent_list_ts = 0.0
             self._entity_chunks = {}
+            self._missing_chunk_attempts = {}
             self._stride_detected = False
             self._layout_anchor_signature = (0, 0)
+            self._layout_identity_signature = ((0, 0), (0, 0))
             self.local_controller_index = None
             self.local_pawn_index = None
             if layout_was_active:
@@ -251,6 +262,9 @@ class MemoryManager:
         self.m_hPlayerPawn = updater.get_netvar("CCSPlayerController", "m_hPlayerPawn") or 0x92C
         self.m_pGameSceneNode = updater.get_netvar("C_BaseEntity", "m_pGameSceneNode") or 0x330
         self.m_pEntity = updater.get_netvar("CEntityInstance", "m_pEntity") or 0x10
+        self.m_pPrevByClass = updater.get_netvar("CEntityIdentity", "m_pPrevByClass") or 0x60
+        self.m_pNextByClass = updater.get_netvar("CEntityIdentity", "m_pNextByClass") or 0x68
+        self.m_vecAbsOrigin = updater.get_netvar("CGameSceneNode", "m_vecAbsOrigin") or 0xC8
         self.m_bDormant = updater.get_netvar("CGameSceneNode", "m_bDormant") or 0x103
         self.m_pBoneArray = (updater.get_netvar("CSkeletonInstance", "m_modelState") or 0x140) + 0x80
 
@@ -288,13 +302,13 @@ class MemoryManager:
         return 0
 
     def _ensure_ent_list(self, detect_stride: bool = True) -> None:
-        """Обновляет указатель entity list не чаще раза в 2 секунды."""
+        """Обновляет layout при переспавнах и смене карты."""
         with self._layout_lock:
             self._ensure_ent_list_locked(detect_stride)
 
     def _ensure_ent_list_locked(self, detect_stride: bool = True) -> None:
         now = time.monotonic()
-        if not self.ent_list or now - self._ent_list_ts > 2.0:
+        if not self.ent_list or now - self._ent_list_ts > ENTITY_LAYOUT_REFRESH_INTERVAL:
             previous_pointer = self.ent_list
             current_pointer = self.read_longlong(
                 self.client_base + self.dwEntityList
@@ -307,17 +321,26 @@ class MemoryManager:
                     self.client_base + self.dwLocalPlayerPawn
                 ) if self.dwLocalPlayerPawn else 0,
             )
+            identity_signature = []
+            for entity in local_signature:
+                identity = self.read_longlong(entity + self.m_pEntity) if entity and self.m_pEntity else 0
+                handle = self.read_int(identity + ENTITY_IDENTITY_HANDLE_OFFSET) & 0xFFFFFFFF if identity else 0
+                identity_signature.append((identity, handle))
+            identity_signature = tuple(identity_signature)
             self.ent_list = current_pointer
             self._ent_list_ts = now
             if (
                 current_pointer != previous_pointer
                 or local_signature != self._layout_anchor_signature
+                or identity_signature != self._layout_identity_signature
             ):
                 self._entity_chunks = {}
+                self._missing_chunk_attempts = {}
                 self._stride_detected = False
                 self.local_controller_index = None
                 self.local_pawn_index = None
                 self._layout_anchor_signature = local_signature
+                self._layout_identity_signature = identity_signature
                 self._layout_generation += 1
             if detect_stride and self.ent_list and not self._stride_detected:
                 self.detect_entity_entry_size()
@@ -328,13 +351,94 @@ class MemoryManager:
         chunk = self._entity_chunks.get(chunk_index)
         if not chunk:
             if self._stride_detected and self._entity_chunks:
-                return 0
-            chunk = self.read_longlong(
-                self.ent_list + 8 * chunk_index + 0x10
-            )
+                chunk = self._find_identity_chunk_locked(chunk_index)
+            else:
+                chunk = self.read_longlong(
+                    self.ent_list + 8 * chunk_index + 0x10
+                )
         if not chunk:
             return 0
-        return self.read_longlong(chunk + entry_size * (index & ENTITY_CHUNK_SIZE))
+        identity_address = chunk + entry_size * (index & ENTITY_CHUNK_SIZE)
+        entity = self.read_longlong(identity_address)
+        if entity and self._entity_chunks and self.m_pEntity:
+            anchor = self._read_identity_anchor(entity)
+            if not anchor or anchor["identity"] != identity_address or anchor["index"] != index:
+                return 0
+        return entity
+
+    def _walk_identity_class(self, entity: int):
+        if not self.pm or not self.m_pEntity or not self.m_pPrevByClass or not self.m_pNextByClass:
+            return [], False
+        initial = self._read_identity_anchor(entity)
+        if not initial:
+            return [], False
+        class_pointer = self.read_longlong(initial["identity"] + 8)
+        if not class_pointer:
+            return [], False
+        pending = [initial["identity"]]
+        visited = set()
+        anchors = {}
+        complete = True
+        read_size = max(ENTITY_ENTRY_MIN_SIZE, self.m_pPrevByClass + 8, self.m_pNextByClass + 8)
+        while pending and len(visited) < ENTITY_CLASS_SCAN_LIMIT:
+            identity = pending.pop()
+            if identity in visited or identity < 0x10000 or identity % 8:
+                if identity not in visited:
+                    complete = False
+                continue
+            visited.add(identity)
+            try:
+                data = self.pm.read_bytes(identity, read_size)
+                pointer, identity_class = struct.unpack_from("<QQ", data)
+                raw_handle = struct.unpack_from("<I", data, ENTITY_IDENTITY_HANDLE_OFFSET)[0]
+                if identity_class != class_pointer:
+                    complete = False
+                    continue
+                for offset in (self.m_pPrevByClass, self.m_pNextByClass):
+                    neighbor = struct.unpack_from("<Q", data, offset)[0]
+                    if neighbor and neighbor not in visited:
+                        pending.append(neighbor)
+                index = self.handle_to_index(raw_handle)
+                if pointer and index is not None and self.read_longlong(pointer + self.m_pEntity) == identity:
+                    anchors[index] = {
+                        "entity": pointer, "identity": identity, "index": index,
+                        "handle": raw_handle, "chunk_index": index >> ENTITY_CHUNK_SHIFT,
+                        "slot": index & ENTITY_CHUNK_SIZE,
+                    }
+                else:
+                    complete = False
+            except Exception:
+                complete = False
+                continue
+        complete = complete and all(identity in visited for identity in pending)
+        return [anchors[index] for index in sorted(anchors)], complete
+
+    def _find_identity_chunk_locked(self, chunk_index: int) -> int:
+        now = time.monotonic()
+        if now - self._missing_chunk_attempts.get(chunk_index, -ENTITY_CHUNK_RETRY_INTERVAL) < ENTITY_CHUNK_RETRY_INTERVAL:
+            return 0
+        self._missing_chunk_attempts[chunk_index] = now
+        generation = self._layout_generation
+        for entity in reversed(self._layout_anchor_signature):
+            anchors, _ = self._walk_identity_class(entity)
+            for anchor in anchors:
+                if anchor["chunk_index"] != chunk_index:
+                    continue
+                chunk = anchor["identity"] - anchor["slot"] * self.entity_entry_size
+                if chunk <= 0 or not self._identity_anchor_matches(anchor, self.entity_entry_size, chunk):
+                    continue
+                if self._layout_generation != generation:
+                    return 0
+                self._entity_chunks = {**self._entity_chunks, chunk_index: chunk}
+                self._layout_generation += 1
+                return chunk
+        return 0
+
+    def get_controller_indices(self, local_controller: int):
+        with self._layout_lock:
+            self._ensure_ent_list_locked()
+            anchors, complete = self._walk_identity_class(local_controller)
+            return tuple(anchor["index"] for anchor in anchors) if complete and anchors else None
 
     def _read_identity_anchor(self, entity: int):
         if not entity or not self.m_pEntity:
@@ -342,15 +446,15 @@ class MemoryManager:
         identity = self.read_longlong(entity + self.m_pEntity)
         if not identity or self.read_longlong(identity) != entity:
             return None
-        index = self.handle_to_index(
-            self.read_int(identity + ENTITY_IDENTITY_HANDLE_OFFSET)
-        )
+        raw_handle = self.read_int(identity + ENTITY_IDENTITY_HANDLE_OFFSET) & 0xFFFFFFFF
+        index = self.handle_to_index(raw_handle)
         if index is None:
             return None
         return {
             "entity": entity,
             "identity": identity,
             "index": index,
+            "handle": raw_handle,
             "chunk_index": index >> ENTITY_CHUNK_SHIFT,
             "slot": index & ENTITY_CHUNK_SIZE,
         }
@@ -367,12 +471,8 @@ class MemoryManager:
             == anchor["identity"]
             and self.read_longlong(anchor["identity"])
             == anchor["entity"]
-            and self.handle_to_index(
-                self.read_int(
-                    anchor["identity"] + ENTITY_IDENTITY_HANDLE_OFFSET
-                )
-            )
-            == anchor["index"]
+            and (self.read_int(anchor["identity"] + ENTITY_IDENTITY_HANDLE_OFFSET) & 0xFFFFFFFF)
+            == anchor["handle"]
         )
 
     def _detect_layout_from_local_identities(
@@ -389,7 +489,14 @@ class MemoryManager:
             )
             if anchor is not None
         ]
+        if len(anchors) < 2 or anchors[0]["chunk_index"] != anchors[1]["chunk_index"]:
+            by_identity = {anchor["identity"]: anchor for anchor in anchors}
+            class_anchors, _ = self._walk_identity_class(local_controller)
+            for anchor in class_anchors:
+                by_identity[anchor["identity"]] = anchor
+            anchors = list(by_identity.values())
         anchors.sort(key=lambda anchor: (anchor["chunk_index"], anchor["slot"]))
+        layouts = set()
         candidates = {}
         for first_index, first in enumerate(anchors):
             for second in anchors[first_index + 1:]:
@@ -406,12 +513,14 @@ class MemoryManager:
                 ):
                     continue
                 chunk = first["identity"] - first["slot"] * entry_size
-                if all(
-                    self._identity_anchor_matches(anchor, entry_size, chunk)
-                    for anchor in anchors
-                    if anchor["chunk_index"] == first["chunk_index"]
-                ):
-                    candidates[entry_size] = (first["chunk_index"], chunk)
+                layouts.add((entry_size, first["chunk_index"], chunk))
+
+        for entry_size, chunk_index, chunk in layouts:
+            if all(
+                self._identity_anchor_matches(anchor, entry_size, chunk)
+                for anchor in anchors if anchor["chunk_index"] == chunk_index
+            ):
+                candidates[entry_size] = (chunk_index, chunk)
 
         if len(candidates) != 1:
             return False
@@ -443,6 +552,11 @@ class MemoryManager:
         self.entity_entry_size = entry_size
         self._entity_chunks = {**self._entity_chunks, **validated_chunks}
         self._layout_anchor_signature = (local_controller, local_pawn)
+        by_entity = {anchor["entity"]: anchor for anchor in anchors}
+        self._layout_identity_signature = tuple(
+            (by_entity[entity]["identity"], by_entity[entity]["handle"]) if entity in by_entity else (0, 0)
+            for entity in (local_controller, local_pawn)
+        )
         self.local_controller_index = None
         self.local_pawn_index = None
         for anchor in anchors:
@@ -581,6 +695,17 @@ class MemoryManager:
         except Exception:
             return None
 
+    def get_entity_by_handle(self, handle: int):
+        index = self.handle_to_index(handle)
+        if index is None:
+            return None
+        with self._layout_lock:
+            entity = self.get_entity(index)
+            if not entity:
+                return None
+            anchor = self._read_identity_anchor(entity)
+            return entity if anchor and anchor["handle"] == (handle & 0xFFFFFFFF) else None
+
     def get_fire_logic_data(self) -> dict | None:
         """Данные о сущности под прицелом.
 
@@ -609,7 +734,7 @@ class MemoryManager:
                 pawn_index = self.handle_to_index(pawn_handle)
                 if pawn_index is None:
                     return None
-                entity_pawn = self.get_entity(pawn_index)
+                entity_pawn = self.get_entity_by_handle(pawn_handle)
                 if not entity_pawn:
                     return None
                 entity_health = self.read_int(entity_pawn + self.m_iHealth)
@@ -655,7 +780,7 @@ class MemoryManager:
             weapon_index = self.handle_to_index(handle)
             if weapon_index is None:
                 return ""
-            weapon = self.get_entity(weapon_index)
+            weapon = self.get_entity_by_handle(handle)
             if not weapon:
                 return ""
             vdata = self.read_longlong(weapon + self.m_nSubclassID + 8)
