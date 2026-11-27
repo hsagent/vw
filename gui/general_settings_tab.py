@@ -22,7 +22,7 @@ FEATURE_SETTINGS = [
 ]
 
 OFFSET_FILES = [
-    ("Offsets File", "offsets.json", "Select offsets.json file", "OffsetsFile"),
+    ("Offsets File", ConfigManager.OFFSETS_FILENAME, "Select off.json file", "OffsetsFile"),
     ("Client DLL File", "client_dll.json", "Select client_dll.json file", "ClientDLLFile"),
     ("Buttons File", "buttons.json", "Select buttons.json file", "ButtonsFile")
 ]

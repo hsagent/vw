@@ -139,7 +139,7 @@ def update_config(self, config: Dict[str, Any]) -> None:
 - NoFlash hardcoded offset
 
 ### Minor: 5
-- Дублирование imports в noflash.py
+- Дублирование imports в nf.py
 - Неиспользуемый код в utility.py
 - Отсутствие логирования версии кэша
 - Неоптимальный порядок проверок
@@ -151,11 +151,11 @@ def update_config(self, config: Dict[str, Any]) -> None:
 
 ### Modified (8):
 1. `classes/config_manager.py` - race condition fix, version bump
-2. `classes/esp.py` - memory leak fix, constants import
+2. `classes/es.py` - memory leak fix, constants import
 3. `classes/memory_manager.py` - caching, constants, safety checks
-4. `classes/triggerbot.py` - logic fix, type hints
-5. `classes/bunnyhop.py` - optimization, constants, type hints
-6. `classes/noflash.py` - configurable offset, type hints
+4. `classes/tric.py` - logic fix, type hints
+5. `classes/sp.py` - optimization, constants, type hints
+6. `classes/nf.py` - configurable offset, type hints
 7. `classes/utility.py` - SSL, caching, update checker
 8. `src/offsets.py` - SSL verification
 

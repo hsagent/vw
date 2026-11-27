@@ -55,7 +55,7 @@ EARLY_EXIT_THRESHOLD = 2
 
 Для 64 tick серверов можно снизить:
 
-**Файл:** `classes/bunnyhop.py:104`
+**Файл:** `classes/sp.py:104`
 ```python
 time.sleep(0.008)  # 125 Hz для 64 tick
 ```
@@ -133,7 +133,7 @@ ENTITY_CHUNK_SIZE = 0x1FF    # Размер chunk (511)
 ```
 
 ### Player Flags
-**Файл:** `classes/bunnyhop.py:12`
+**Файл:** `classes/sp.py:12`
 
 ```python
 FL_ONGROUND = 1 << 0   # На земле
@@ -161,7 +161,7 @@ Logger.setup_logging(level=logging.DEBUG)
 
 Добавьте счетчик FPS в ESP:
 
-**Файл:** `classes/esp.py:450` (после `start_time = time.time()`):
+**Файл:** `classes/es.py:450` (после `start_time = time.time()`):
 
 ```python
 frame_count = 0

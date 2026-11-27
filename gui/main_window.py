@@ -17,10 +17,10 @@ from watchdog.observers import Observer
 # Полностью обновленные и исправленные импорты под архитектуру CS2
 from classes.updater import Updater
 from classes.utility import Utility
-from classes.triggerbot import CS2TriggerBot      
-from classes.esp import CS2Overlay
-from classes.bunnyhop import CS2Bunnyhop
-from classes.noflash import CS2NoFlash
+from classes.tric import CS2TriggerBot      
+from classes.es import CS2Overlay
+from classes.sp import CS2Bunnyhop
+from classes.nf import CS2NoFlash
 from classes.config_manager import ConfigManager, COLOR_CHOICES
 from classes.config_handler import ConfigFileChangeHandler 
 from classes.logger import Logger
@@ -29,7 +29,7 @@ from classes.client_manager import ClientManager
 
 from gui.home_tab import populate_dashboard
 from gui.general_settings_tab import populate_general_settings
-from gui.trigger_settings_tab import populate_trigger_settings
+from gui.tric_settings_tab import populate_trigger_settings
 from gui.overlay_settings_tab import populate_overlay_settings
 from gui.additional_settings_tab import populate_additional_settings
 from gui.logs_tab import populate_logs, LOG_DISPLAY_MAX_LINES

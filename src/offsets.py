@@ -53,6 +53,7 @@ class OffsetManager:
         self.client = {}
         self.buttons = {}
         self._loaded_source = None
+        self._snapshots = {}
         self._fetch_lock = threading.RLock()
         self._load_urls_from_config()
 
@@ -89,11 +90,21 @@ class OffsetManager:
         self.offsets, self.client, self.buttons = {}, {}, {}
         self._loaded_source = None
 
-    def _cache_directory(self):
-        if self.source_name not in OFFSET_SOURCES:
-            raise ValueError("Unknown offset source")
-        cache_dir = Path(ConfigManager.OFFSETS_DIRECTORY)
-        return cache_dir if self.source_name == "a2x" else cache_dir / self.source_name
+    @staticmethod
+    def _remove_legacy_offset_files() -> bool:
+        """Удаляет старые автоматически сохранённые файлы оффсетов."""
+        root = Path(ConfigManager.OFFSETS_DIRECTORY).resolve()
+        success = True
+        for directory in (root, *(root / source for source in OFFSET_SOURCES)):
+            if not directory.resolve().is_relative_to(root):
+                continue
+            for filename in ("off.json", "offsets.json"):
+                try:
+                    (directory / filename).unlink(missing_ok=True)
+                except OSError as e:
+                    logger.error("[Offsets] Не удалось удалить старый кэш %s: %s", directory / filename, e)
+                    success = False
+        return success
 
     def invalidate(self) -> None:
         """Помечает текущий снимок устаревшим после изменения GUI-настроек."""
@@ -105,7 +116,7 @@ class OffsetManager:
         return self.load_configured_offsets()
 
     def _fetch_offsets_locked(self) -> bool:
-        """Скачивает актуальные оффсеты и принудительно сохраняет их в папку AppData."""
+        """Скачивает и проверяет оффсеты, сохраняя данные только в памяти."""
         try:
             print(f"[Offsets] Загрузка смещений из источника {self.source_name}...")
             with ThreadPoolExecutor(max_workers=3) as pool:
@@ -117,25 +128,17 @@ class OffsetManager:
                 offsets, client, buttons = (response.json() for response in responses)
                 if not self._validate_payloads(offsets, client, buttons):
                     raise ValueError("Некорректная структура JSON оффсетов")
-                cache_dir = self._cache_directory()
-                cache_dir.mkdir(parents=True, exist_ok=True)
-                for filename, payload in (
-                    ("offsets.json", offsets),
-                    ("client_dll.json", client),
-                    ("buttons.json", buttons),
-                ):
-                    with (cache_dir / filename).open("w", encoding="utf-8") as file:
-                        json.dump(payload, file, indent=2)
+                self._snapshots[self.source_name] = (offsets, client, buttons)
 
                 self.offsets, self.client, self.buttons = offsets, client, buttons
                 self._loaded_source = self.source_name
-                print(f"[Offsets] Файлы успешно скачаны и сохранены в: {cache_dir}")
+                print(f"[Offsets] Данные {self.source_name} загружены в память.")
                 return True
             else:
                 print(f"[Offsets] Ошибка серверов GitHub. Коды: {', '.join(str(r.status_code) for r in responses)}")
                 return self.load_cached_offsets()
         except Exception as e:
-            print(f"[Offsets] Критическая ошибка при сохранении смещений в AppData: {e}")
+            print(f"[Offsets] Ошибка загрузки смещений: {e}")
             return self.load_cached_offsets()
 
     @staticmethod
@@ -165,7 +168,7 @@ class OffsetManager:
     def _configured_local_paths(general_config):
         """Возвращает нормализованные пути локальных файлов из config.json."""
         defaults = {
-            "offsets": Path(ConfigManager.OFFSETS_DIRECTORY) / "offsets.json",
+            "offsets": Path(ConfigManager.OFFSETS_DIRECTORY) / ConfigManager.OFFSETS_FILENAME,
             "client": Path(ConfigManager.OFFSETS_DIRECTORY) / "client_dll.json",
             "buttons": Path(ConfigManager.OFFSETS_DIRECTORY) / "buttons.json",
         }
@@ -190,6 +193,10 @@ class OffsetManager:
             if not isinstance(source, str) or source not in OFFSET_SOURCES:
                 self._clear_snapshot()
                 logger.error("[Offsets] Неизвестный источник: %s", source)
+                return False
+
+            if not self._remove_legacy_offset_files():
+                self._clear_snapshot()
                 return False
 
             if source != self.source_name:
@@ -239,23 +246,19 @@ class OffsetManager:
             return False
 
     def load_cached_offsets(self) -> bool:
-        """Загружает ранее сохранённые оффсеты из AppData (работа без сети)."""
+        """Использует только проверенный снимок текущего источника в памяти."""
         with self._fetch_lock:
-            try:
-                cache_dir = self._cache_directory()
-                payloads = []
-                for filename in ("offsets.json", "client_dll.json", "buttons.json"):
-                    with (cache_dir / filename).open("r", encoding="utf-8-sig") as file:
-                        payloads.append(json.load(file))
-                if self._validate_payloads(*payloads):
-                    self.offsets, self.client, self.buttons = payloads
-                    self._loaded_source = self.source_name
-                    print(f"[Offsets] Сеть недоступна — использован локальный кэш: {cache_dir}")
-                    return True
-            except Exception as e:
-                print(f"[Offsets] Локальный кэш смещений недоступен: {e}")
+            payloads = self._snapshots.get(self.source_name)
+            if payloads and self._validate_payloads(*payloads):
+                self.offsets, self.client, self.buttons = payloads
+                self._loaded_source = self.source_name
+                logger.info("[Offsets] Использован снимок %s из памяти.", self.source_name)
+                return True
+            self._snapshots.pop(self.source_name, None)
             self._clear_snapshot()
+            logger.error("[Offsets] Нет данных %s в памяти; требуется подключение к сети.", self.source_name)
             return False
+
     def get_offset(self, module: str, name: str) -> int:
         """Получает базовый оффсет (например, dwEntityList)."""
         try:

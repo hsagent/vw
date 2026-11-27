@@ -33,7 +33,7 @@ class Utility:
         if source == "local":
             config_dir = Path(ConfigManager.CONFIG_DIRECTORY)
             try:
-                offset = orjson.loads(Path(config.get("General", {}).get("OffsetsFile", config_dir / "offsets.json")).read_bytes())
+                offset = orjson.loads(Path(config.get("General", {}).get("OffsetsFile", config_dir / ConfigManager.OFFSETS_FILENAME)).read_bytes())
                 client = orjson.loads(Path(config.get("General", {}).get("ClientDLLFile", config_dir / "client_dll.json")).read_bytes())
                 buttons = orjson.loads(Path(config.get("General", {}).get("ButtonsFile", config_dir / "buttons.json")).read_bytes())
                 return offset, client, buttons

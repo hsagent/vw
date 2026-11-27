@@ -14,7 +14,7 @@ from classes.logger import LoggerConfig, SuppressErrorFilter
 # Load the real worker without caching a stub-backed production module.
 spec = importlib.util.spec_from_file_location(
     "overlay_under_test",
-    Path(__file__).resolve().parents[1] / "classes" / "esp.py",
+    Path(__file__).resolve().parents[1] / "classes" / "es.py",
 )
 esp = importlib.util.module_from_spec(spec)
 with patch.dict(sys.modules, {"pyMeow": types.ModuleType("pyMeow")}):

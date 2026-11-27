@@ -9,7 +9,7 @@
 **Влияние:** Исключены редкие краши при многопоточной загрузке конфига
 
 ### 2. Memory Leak в ESP Overlay
-**Файл:** `classes/esp.py:509-518`  
+**Файл:** `classes/es.py:509-518`  
 **Проблема:** `end_drawing()` вызывался даже если `begin_drawing()` не выполнился  
 **Решение:** Двухуровневый try-except с защитой `begin_drawing()` отдельным блоком  
 **Влияние:** Предотвращен крах raylib при ошибках рендеринга
@@ -21,7 +21,7 @@
 **Влияние:** Исключены segfault при работе с неинициализированной памятью
 
 ### 4. TARGET_GRACE Logic Bug
-**Файл:** `classes/triggerbot.py:224-226`  
+**Файл:** `classes/tric.py:224-226`  
 **Проблема:** Grace period не сбрасывал target state после истечения  
 **Решение:** Явный комментарий и гарантированный вызов `_reset_target()` после grace  
 **Влияние:** Триггер теперь корректно обрабатывает кратковременную потерю цели
@@ -49,7 +49,7 @@
 **Влияние:** Снижение CPU в ESP на 5-7% при русских никах
 
 ### 8. Bunnyhop Busy-Wait Reduction
-**Файл:** `classes/bunnyhop.py:104`  
+**Файл:** `classes/sp.py:104`  
 **Проблема:** `time.sleep(0.001)` создавал ~1000 итераций/сек  
 **Решение:** Увеличен до `0.005` (200 Hz достаточно для 128 tick)  
 **Влияние:** Снижение CPU load модуля bhop на 80%
@@ -59,7 +59,7 @@
 ## 🎯 Улучшения качества кода
 
 ### 9. Magic Numbers → Constants
-**Файлы:** `classes/memory_manager.py`, `classes/bunnyhop.py`  
+**Файлы:** `classes/memory_manager.py`, `classes/sp.py`  
 **Добавлены константы:**
 - `ENTITY_INDEX_MASK = 0x7FFF`
 - `ENTITY_CHUNK_SHIFT = 9`
@@ -69,7 +69,7 @@
 **Влияние:** Код самодокументирован, легче поддерживать
 
 ### 10. Type Hints
-**Файлы:** `classes/triggerbot.py`, `classes/bunnyhop.py`, `classes/noflash.py`, `classes/esp.py`  
+**Файлы:** `classes/tric.py`, `classes/sp.py`, `classes/nf.py`, `classes/es.py`  
 **Добавлено:**
 ```python
 def update_config(self, config: Dict[str, Any]) -> None:
@@ -77,7 +77,7 @@ def update_config(self, config: Dict[str, Any]) -> None:
 **Влияние:** Лучшая IDE поддержка и type checking
 
 ### 11. Унификация Entity Handle Маскирования
-**Файлы:** `classes/esp.py`, `classes/memory_manager.py`  
+**Файлы:** `classes/es.py`, `classes/memory_manager.py`  
 **Проблема:** Разные участки кода использовали хардкод `& 0x7FFF`  
 **Решение:** Везде импортируется и используется `ENTITY_INDEX_MASK`  
 **Влияние:** Единая точка изменения при смене формата handles
@@ -101,7 +101,7 @@ requests.get(url, timeout=10, verify=True)
 **Влияние:** Работающие уведомления об обновлениях
 
 ### 14. NoFlash Configurable Offset
-**Файл:** `classes/noflash.py:45-65`  
+**Файл:** `classes/nf.py:45-65`  
 **Проблема:** Хардкод `-4` для `flash_max_alpha_offset`  
 **Решение:** Конфигурируемое значение через `FlashMaxAlphaOffset` в конфиге  
 **Влияние:** Адаптивность под разные билды CS2

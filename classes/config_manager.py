@@ -21,6 +21,7 @@ class ConfigManager:
     # ЖЕСТКАЯ ПРИВЯЗКА К СИСТЕМНОЙ ПАПКЕ В APPDATA
     CONFIG_DIRECTORY = os.path.expanduser(r'~\AppData\Local\My Project')
     OFFSETS_DIRECTORY = os.path.join(CONFIG_DIRECTORY, "Offsets")
+    OFFSETS_FILENAME = "off.json"
     UPDATE_DIRECTORY = os.path.join(CONFIG_DIRECTORY, "Update")
     CONFIG_FILE = Path(CONFIG_DIRECTORY) / 'config.json'
 
@@ -34,7 +35,7 @@ class ConfigManager:
             "Bunnyhop": False,
             "Noflash": False,
             "OffsetSource": "a2x",
-            "OffsetsFile": str(Path(OFFSETS_DIRECTORY) / "offsets.json"),
+            "OffsetsFile": str(Path(OFFSETS_DIRECTORY) / OFFSETS_FILENAME),
             "ClientDLLFile": str(Path(OFFSETS_DIRECTORY) / "client_dll.json"),
             "ButtonsFile": str(Path(OFFSETS_DIRECTORY) / "buttons.json")
         },
@@ -114,7 +115,6 @@ class ConfigManager:
     def _ensure_directories(cls) -> None:
         try:
             Path(cls.CONFIG_DIRECTORY).mkdir(parents=True, exist_ok=True)
-            Path(cls.OFFSETS_DIRECTORY).mkdir(parents=True, exist_ok=True)
         except OSError as e:
             logger.error(f"Не удалось создать директории: {e}")
     @classmethod

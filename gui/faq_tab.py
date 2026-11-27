@@ -93,7 +93,7 @@ def populate_faq(main_window, frame):
         ),
         (
             "How do I update the offsets?",
-            "My Project automatically fetches offsets from https://github.com/a2x/cs2-dumper on startup, ensuring compatibility with Counter-Strike 2 updates. Check the last update time on the Dashboard tab. If fetching fails, manually download offsets.json, client_dll.json, and buttons.json from the cs2-dumper repository and update the URLs in utility.py. For troubleshooting, see 'Offset Fetching and Management' in the Features collection."
+            "My Project automatically fetches offsets from https://github.com/a2x/cs2-dumper on startup, ensuring compatibility with Counter-Strike 2 updates. Check the last update time on the Dashboard tab. Downloaded data stays in memory and is never saved to JSON files. An internet connection is required after restarting the application. If a refresh fails, the last valid data from the same source can be reused during the current run. For troubleshooting, see 'Offset Fetching and Management' in the Features collection."
         ),
         (
             "Why isn't the TriggerBot triggering?",

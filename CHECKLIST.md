@@ -32,11 +32,11 @@
 
 ## Файлы изменены (14 total):
 1. ✅ classes/config_manager.py
-2. ✅ classes/esp.py
+2. ✅ classes/es.py
 3. ✅ classes/memory_manager.py
-4. ✅ classes/triggerbot.py
-5. ✅ classes/bunnyhop.py
-6. ✅ classes/noflash.py
+4. ✅ classes/tric.py
+5. ✅ classes/sp.py
+6. ✅ classes/nf.py
 7. ✅ classes/utility.py
 8. ✅ src/offsets.py
 
